@@ -198,6 +198,22 @@ def generate_question_papers(
             
             answer_df = pd.DataFrame(answer_rows)
             answer_df.to_excel(writer, sheet_name='Answer_Key', index=False)
+        
+        # Question Bank sheet (embedded for Part 2 answer checking)
+        bank_rows = []
+        for q in question_bank.get_all():
+            bank_rows.append({
+                'question_no': q.question_no,
+                'question': q.question_text,
+                'option_a': q.option_a,
+                'option_b': q.option_b,
+                'option_c': q.option_c,
+                'option_d': q.option_d,
+                'answer': q.answer,
+                'difficulty': q.difficulty,
+            })
+        bank_df = pd.DataFrame(bank_rows)
+        bank_df.to_excel(writer, sheet_name='Question_Bank', index=False)
     
     return output_path
 

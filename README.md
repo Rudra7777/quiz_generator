@@ -21,6 +21,17 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+## Automated Testing
+
+Run the answer-checking integration tests locally:
+
+```bash
+pytest -q
+```
+
+CI runs the same tests on every push/PR via:
+- `/Users/rudrapatole/Desktop/quiz/.github/workflows/tests.yml`
+
 ### Randomization Behavior
 
 - Streamlit app: default is fresh random seed on each generation.

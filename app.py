@@ -284,6 +284,44 @@ def create_formatted_excel(
     ws.column_dimensions['D'].width = 14
     ws.column_dimensions['E'].width = 12
 
+    # ══════════════════════════════════════════════════════════════════════
+    # Question Bank Sheet (embedded for Part 2 answer checking)
+    # ══════════════════════════════════════════════════════════════════════
+    ws = wb.create_sheet(title="Question_Bank")
+    ws['A1'] = "Question Bank (Embedded for Answer Checking)"
+    ws['A1'].font = Font(bold=True, size=14)
+    ws.merge_cells('A1:H1')
+
+    qb_headers = ['question_no', 'question', 'option_a', 'option_b',
+                   'option_c', 'option_d', 'answer', 'difficulty']
+    qb_fill = PatternFill(start_color="8DB4E2", end_color="8DB4E2", fill_type="solid")
+    for col, h in enumerate(qb_headers, 1):
+        cell = ws.cell(row=3, column=col, value=h)
+        cell.font = header_font_white
+        cell.fill = qb_fill
+        cell.border = thin_border
+
+    for q_idx, q in enumerate(question_bank.get_all()):
+        row = q_idx + 4
+        ws.cell(row=row, column=1, value=q.question_no).border = thin_border
+        ws.cell(row=row, column=1).alignment = center_align
+        ws.cell(row=row, column=2, value=q.question_text).border = thin_border
+        ws.cell(row=row, column=2).alignment = wrap_align
+        ws.cell(row=row, column=3, value=q.option_a).border = thin_border
+        ws.cell(row=row, column=4, value=q.option_b).border = thin_border
+        ws.cell(row=row, column=5, value=q.option_c).border = thin_border
+        ws.cell(row=row, column=6, value=q.option_d).border = thin_border
+        ws.cell(row=row, column=7, value=q.answer).border = thin_border
+        ws.cell(row=row, column=7).alignment = center_align
+        ws.cell(row=row, column=8, value=q.difficulty.capitalize()).border = thin_border
+
+    ws.column_dimensions['A'].width = 12
+    ws.column_dimensions['B'].width = 50
+    for ch in 'CDEF':
+        ws.column_dimensions[ch].width = 20
+    ws.column_dimensions['G'].width = 10
+    ws.column_dimensions['H'].width = 12
+
     # ── Save ──────────────────────────────────────────────────────────────
     output = io.BytesIO()
     wb.save(output)
