@@ -62,7 +62,11 @@ class UsageTracker:
     of the least-used eligible question.
     """
     
-    def __init__(self, question_ids_by_difficulty: Dict[str, List[str]]):
+    def __init__(
+        self,
+        question_ids_by_difficulty: Dict[str, List[str]],
+        rng: Optional[random.Random] = None
+    ):
         """
         Initialize tracker with question IDs grouped by difficulty.
         
@@ -71,6 +75,8 @@ class UsageTracker:
         """
         # Primary usage count storage: question_id -> count
         self.usage_counts: Dict[str, int] = {}
+        # Local RNG to avoid global random state side-effects.
+        self._rng = rng or random.Random()
         # Min-heaps per difficulty: (count, tiebreaker, question_id)
         self._heaps: Dict[str, List[Tuple[int, float, str]]] = defaultdict(list)
         
@@ -80,7 +86,7 @@ class UsageTracker:
                 self.usage_counts[qid] = 0
                 heapq.heappush(
                     self._heaps[difficulty],
-                    (0, random.random(), qid)
+                    (0, self._rng.random(), qid)
                 )
     
     def get_least_used(self, difficulty: str, excluded: Set[str]) -> str:
@@ -96,9 +102,9 @@ class UsageTracker:
             actual_count = self.usage_counts[qid]
             
             if count != actual_count:
-                heapq.heappush(heap, (actual_count, random.random(), qid))
+                heapq.heappush(heap, (actual_count, self._rng.random(), qid))
             elif qid in excluded:
-                candidates.append((count, random.random(), qid))
+                candidates.append((count, self._rng.random(), qid))
             else:
                 for c in candidates:
                     heapq.heappush(heap, c)
@@ -123,7 +129,7 @@ class UsageTracker:
             if qid == question_id:
                 heapq.heappush(
                     self._heaps[difficulty],
-                    (new_count, random.random(), qid)
+                    (new_count, self._rng.random(), qid)
                 )
             delattr(self, '_pending_push')
     
@@ -172,7 +178,7 @@ def allocate_quizzes(
     question_ids_by_difficulty: Dict[str, List[str]],
     num_students: int,
     quiz_structure: QuizStructure,
-    seed: int = None
+    seed: Optional[int] = None
 ) -> Tuple[List[List[str]], Dict[str, int]]:
     """
     Allocate questions to students using greedy load-balancing.
@@ -188,8 +194,7 @@ def allocate_quizzes(
         - allocation_matrix: 2D list [num_students][total_questions] of question_ids
         - usage_counts: Dict mapping question_id to total usage count
     """
-    if seed is not None:
-        random.seed(seed)
+    rng = random.Random(seed) if seed is not None else random.Random()
     
     # Validate
     counts = {d: len(ids) for d, ids in question_ids_by_difficulty.items()}
@@ -198,7 +203,7 @@ def allocate_quizzes(
         raise ValueError(f"Invalid configuration: {errors}")
     
     # Initialize tracker
-    tracker = UsageTracker(question_ids_by_difficulty)
+    tracker = UsageTracker(question_ids_by_difficulty, rng=rng)
     
     # Allocation matrix
     allocation_matrix: List[List[str]] = []
@@ -219,21 +224,28 @@ def allocate_quizzes(
     return allocation_matrix, tracker.get_usage_counts()
 
 
-def shuffle_quiz(quiz: list, seed: int = None) -> list:
+def shuffle_quiz(
+    quiz: list,
+    seed: Optional[int] = None,
+    rng: Optional[random.Random] = None
+) -> list:
     """Shuffle questions within a quiz."""
     shuffled = quiz.copy()
-    if seed is not None:
-        random.seed(seed)
-    random.shuffle(shuffled)
+    if rng is None:
+        rng = random.Random(seed) if seed is not None else random.Random()
+    rng.shuffle(shuffled)
     return shuffled
 
 
-def shuffle_all_quizzes(allocation_matrix: list, base_seed: int = None) -> list:
+def shuffle_all_quizzes(
+    allocation_matrix: list,
+    base_seed: Optional[int] = None
+) -> list:
     """Shuffle questions for all students."""
+    rng = random.Random(base_seed) if base_seed is not None else random.Random()
     shuffled_matrix = []
-    for i, quiz in enumerate(allocation_matrix):
-        seed = base_seed + i if base_seed is not None else None
-        shuffled_matrix.append(shuffle_quiz(quiz, seed))
+    for quiz in allocation_matrix:
+        shuffled_matrix.append(shuffle_quiz(quiz, rng=rng))
     return shuffled_matrix
 
 

@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 import io
 import os
+import secrets
 from typing import Dict, List
 from collections import defaultdict
 
@@ -419,9 +420,34 @@ def main():
     st.divider()
 
     # ========================================================================
-    # Step 4: Generate
+    # Step 4: Randomization
     # ========================================================================
-    st.header("4️⃣ Generate Question Papers")
+    st.header("4️⃣ Randomization")
+
+    use_fixed_seed = st.checkbox(
+        "Use fixed seed (reproducible output)",
+        value=False,
+        help="Enable this if you want the exact same allocation for identical inputs."
+    )
+    fixed_seed = None
+    if use_fixed_seed:
+        fixed_seed = st.number_input(
+            "Seed value",
+            min_value=0,
+            max_value=2_147_483_647,
+            value=42,
+            step=1
+        )
+        st.caption("Same input + same seed -> same allocation.")
+    else:
+        st.caption("Each generation uses a fresh random seed.")
+
+    st.divider()
+
+    # ========================================================================
+    # Step 5: Generate
+    # ========================================================================
+    st.header("5️⃣ Generate Question Papers")
 
     can_generate = (
         question_bank is not None
@@ -444,16 +470,18 @@ def main():
                     'easy': question_bank.get_question_ids_by_difficulty('easy'),
                 }
 
+                run_seed = int(fixed_seed) if use_fixed_seed else secrets.randbelow(2_147_483_647)
+
                 # Run allocation
                 allocation_matrix, usage_counts = allocate_quizzes(
                     q_ids_by_diff,
                     num_students=num_students,
                     quiz_structure=quiz_structure,
-                    seed=42
+                    seed=run_seed
                 )
 
                 # Shuffle
-                shuffled_matrix = shuffle_all_quizzes(allocation_matrix, base_seed=42)
+                shuffled_matrix = shuffle_all_quizzes(allocation_matrix, base_seed=run_seed)
 
                 # Create formatted Excel with all sheets
                 excel_bytes = create_formatted_excel(
@@ -479,6 +507,11 @@ def main():
                 col1.metric("Students", num_students)
                 col2.metric("Questions/Quiz", total_questions)
                 col3.metric("Total Sheets", num_students + 4)  # papers + answer key + alloc + shuffled + eval
+
+                if use_fixed_seed:
+                    st.caption(f"Seed used: {run_seed} (fixed)")
+                else:
+                    st.caption(f"Seed used: {run_seed} (auto-generated for this run)")
 
                 st.caption("Sheets: Set_1 … Set_N, Answer_Key, Allocation_Table, Shuffled_Table, Evaluation")
 

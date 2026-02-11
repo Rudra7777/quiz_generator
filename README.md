@@ -21,6 +21,11 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+### Randomization Behavior
+
+- Streamlit app: default is fresh random seed on each generation.
+- CLI (`main.py`): runs are random by default; pass `--seed <number>` for reproducible output.
+
 ## Question Bank Format
 
 Your Excel file should have these columns:

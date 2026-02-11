@@ -43,7 +43,6 @@ DEFAULT_HARD = 4
 DEFAULT_MEDIUM = 6
 DEFAULT_EASY = 5
 DEFAULT_STUDENTS = 50
-RANDOM_SEED = 42
 
 
 def parse_args():
@@ -109,8 +108,8 @@ Examples:
     parser.add_argument(
         '--seed',
         type=int,
-        default=RANDOM_SEED,
-        help=f'Random seed for reproducibility (default: {RANDOM_SEED})'
+        default=None,
+        help='Optional random seed for reproducible output (default: random each run)'
     )
     
     return parser.parse_args()
@@ -221,6 +220,10 @@ def main():
     # ========================================================================
     print(f"\n[3/5] Allocating questions to {args.students} students...")
     print("  Using: Greedy Load-Balancing with Min-Heap")
+    if args.seed is None:
+        print("  Randomization: fresh each run (no fixed seed)")
+    else:
+        print(f"  Randomization: fixed seed = {args.seed}")
     
     # Get question IDs by difficulty
     q_ids_by_diff = {
