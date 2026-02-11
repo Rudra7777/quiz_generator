@@ -354,10 +354,52 @@ def _make_excel_bytes_from_dataframe(df: pd.DataFrame, sheet_name: str) -> bytes
 
 def _load_question_bank_from_question_papers(question_papers_path: str) -> FullQuestionBank:
     """Load embedded Question_Bank sheet from question_papers.xlsx."""
+    required_cols = [
+        "question_no",
+        "question",
+        "option_a",
+        "option_b",
+        "option_c",
+        "option_d",
+        "answer",
+        "difficulty",
+    ]
+    normalized_required = set(required_cols)
+
+    def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
+        out = df.copy()
+        out.columns = [str(c).strip().lower().replace(" ", "_") for c in out.columns]
+        return out
+
     temp_path = None
     try:
         try:
-            question_bank_df = pd.read_excel(question_papers_path, sheet_name="Question_Bank")
+            # Support both formats:
+            # 1) plain table with header on first row
+            # 2) styled sheet with title row and header at row 3 (0-index header=2)
+            question_bank_df = None
+            for header_row in (0, 1, 2, 3, 4):
+                candidate = pd.read_excel(question_papers_path, sheet_name="Question_Bank", header=header_row)
+                candidate = _normalize_cols(candidate)
+                if normalized_required.issubset(set(candidate.columns)):
+                    question_bank_df = candidate[required_cols].copy()
+                    question_bank_df = question_bank_df.dropna(how="all")
+                    break
+
+            if question_bank_df is None:
+                raise ValueError(
+                    f"Missing required columns: {required_cols}"
+                )
+        except ValueError as exc:
+            if "Worksheet named 'Question_Bank' not found" in str(exc):
+                raise ValueError(
+                    "Question_Bank sheet not found in question papers. "
+                    "Regenerate papers with the latest app/CLI."
+                ) from exc
+            raise ValueError(
+                "Question_Bank sheet is present but not in expected format. "
+                "Regenerate papers with the latest app/CLI."
+            ) from exc
         except Exception as exc:
             raise ValueError(
                 "Question_Bank sheet not found in question papers. "

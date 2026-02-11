@@ -54,6 +54,16 @@ class StudentReport:
     def set_no(self) -> str:
         return self.validation.set_no
 
+    @property
+    def score(self) -> int:
+        """Obtained marks (1 mark per correct answer)."""
+        return self.correct
+
+    @property
+    def max_marks(self) -> int:
+        """Maximum possible marks for the assigned quiz."""
+        return self.assigned
+
 
 @dataclass
 class ScoringReport:
@@ -245,6 +255,8 @@ def generate_scoring_report(report: ScoringReport, output_path: str) -> str:
                 "Set": r.set_no,
                 "Assigned": r.assigned,
                 "Attempted": r.attempted,
+                "Score": r.score,
+                "Max Marks": r.max_marks,
                 "Correct": r.correct,
                 "Wrong": r.wrong,
                 "Unanswered": r.unanswered,
