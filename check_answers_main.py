@@ -214,12 +214,18 @@ def run_check(args):
 
     # Save report
     print(f"\n[4/4] Saving scoring report...")
-    output_path = generate_scoring_report(report, args.output)
+    output_path = generate_scoring_report(
+        report,
+        args.output,
+        response_df=response_df,
+        question_papers_path=args.question_papers,
+        question_bank=question_bank,
+    )
     print(f"  ✓ Saved: {output_path}")
 
     print(f"\n{'=' * 70}")
     print(f"✅ Scoring complete! Report: {output_path}")
-    print(f"   Sheets: Scores, Summary, Validation")
+    print(f"   Sheets: Scores, Summary, Validation, Responses_Review")
     print(f"{'=' * 70}")
 
     return True

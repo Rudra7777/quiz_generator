@@ -770,7 +770,13 @@ def _render_answer_checking_tab():
 
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="part2_report_") as report_tmp:
                     report_temp_path = report_tmp.name
-                generate_scoring_report(report, report_temp_path)
+                generate_scoring_report(
+                    report,
+                    report_temp_path,
+                    response_df=response_df,
+                    question_papers_path=qp_path,
+                    question_bank=question_bank,
+                )
                 with open(report_temp_path, "rb") as f:
                     report_bytes = f.read()
 

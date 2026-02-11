@@ -12,6 +12,7 @@ from typing import Dict, List, Optional
 import re
 
 import pandas as pd
+from openpyxl.styles import PatternFill
 
 from excel_handler import FullQuestionBank
 from response_generator import map_paper_to_bank_questions
@@ -207,9 +208,23 @@ def check_all_responses(
     )
 
 
-def generate_scoring_report(report: ScoringReport, output_path: str) -> str:
+def generate_scoring_report(
+    report: ScoringReport,
+    output_path: str,
+    response_df: Optional[pd.DataFrame] = None,
+    question_papers_path: Optional[str] = None,
+    question_bank: Optional[FullQuestionBank] = None,
+) -> str:
     """
-    Write scoring report to Excel with Scores, Summary, and Validation sheets.
+    Write scoring report to Excel.
+
+    Always includes:
+    - Scores
+    - Summary
+    - Validation
+
+    Additionally includes 'Responses_Review' with colored answer cells when
+    response_df, question_papers_path, and question_bank are provided.
     """
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -271,5 +286,48 @@ def generate_scoring_report(report: ScoringReport, output_path: str) -> str:
         scores_df.to_excel(writer, sheet_name="Scores", index=False)
         summary_df.to_excel(writer, sheet_name="Summary", index=False)
         validation_df.to_excel(writer, sheet_name="Validation", index=False)
+
+        if (
+            response_df is not None
+            and question_papers_path is not None
+            and question_bank is not None
+        ):
+            review_df = response_df.copy()
+            review_df.to_excel(writer, sheet_name="Responses_Review", index=False)
+
+            ws = writer.book["Responses_Review"]
+            green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+            red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+
+            set_to_question_nos = map_paper_to_bank_questions(question_papers_path, question_bank)
+            qno_to_answer = {
+                q.question_no: str(q.answer).strip().upper()
+                for q in question_bank.get_all()
+            }
+
+            col_to_idx = {str(col): idx + 1 for idx, col in enumerate(review_df.columns)}
+
+            for row_idx, row in review_df.iterrows():
+                set_no = str(row.get("Set_No", "")).strip()
+                assigned_qnos = set(set_to_question_nos.get(set_no, []))
+                excel_row = row_idx + 2  # Header is row 1
+
+                for col in review_df.columns:
+                    match = QUESTION_COL_RE.match(str(col))
+                    if not match:
+                        continue
+
+                    q_no = int(match.group(1))
+                    answer = _normalize_answer(row[col])
+                    if answer is None:
+                        continue
+
+                    excel_col = col_to_idx[str(col)]
+                    cell = ws.cell(row=excel_row, column=excel_col)
+
+                    if q_no in assigned_qnos and answer == qno_to_answer.get(q_no):
+                        cell.fill = green_fill
+                    else:
+                        cell.fill = red_fill
 
     return output_path

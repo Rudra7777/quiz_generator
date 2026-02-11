@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+from openpyxl import load_workbook
 
 from answer_checker import (
     check_all_responses,
@@ -112,8 +113,31 @@ def test_validation_flags_extra_answer_on_unassigned_question(tmp_path: Path):
     assert extra_qno in first.validation.extra_questions
 
     output_path = tmp_path / "scoring_report_with_issue.xlsx"
-    saved = generate_scoring_report(report, str(output_path))
+    saved = generate_scoring_report(
+        report,
+        str(output_path),
+        response_df=response_df,
+        question_papers_path=str(QUESTION_PAPERS),
+        question_bank=question_bank,
+    )
     assert Path(saved).exists()
+
+    xl = pd.ExcelFile(saved)
+    assert "Responses_Review" in xl.sheet_names
+
+    wb = load_workbook(saved)
+    ws = wb["Responses_Review"]
+    has_colored = False
+    for row in ws.iter_rows(min_row=2):
+        for cell in row:
+            if cell.fill and cell.fill.fill_type == "solid":
+                color = (cell.fill.start_color.rgb or "").upper()
+                if color.endswith("C6EFCE") or color.endswith("FFC7CE"):
+                    has_colored = True
+                    break
+        if has_colored:
+            break
+    assert has_colored
 
     validation_df = pd.read_excel(saved, sheet_name="Validation")
     assert "Extra Count" in validation_df.columns
