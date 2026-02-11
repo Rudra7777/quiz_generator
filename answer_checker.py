@@ -131,8 +131,24 @@ def load_response_sheet(filepath: str) -> pd.DataFrame:
     """
     df = pd.read_excel(filepath, sheet_name=0)
     df.columns = [str(c).strip() for c in df.columns]
+
     if "Set_No" not in df.columns:
-        raise ValueError("Missing required column 'Set_No' in responses sheet")
+        normalized = {c.lower().replace(" ", "").replace("_", ""): c for c in df.columns}
+        set_aliases = ("setno", "set", "q")
+        alias_col = next((normalized[a] for a in set_aliases if a in normalized), None)
+
+        # Fallback: if first column looks like set labels, treat it as Set_No.
+        if alias_col is None and len(df.columns) > 0:
+            first_col = df.columns[0]
+            sample = df[first_col].dropna().astype(str).head(5)
+            if not sample.empty and sample.str.startswith("Set_").all():
+                alias_col = first_col
+
+        if alias_col is not None:
+            df = df.rename(columns={alias_col: "Set_No"})
+        else:
+            raise ValueError("Missing required column 'Set_No' in responses sheet")
+
     return df
 
 

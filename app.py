@@ -11,11 +11,18 @@ import numpy as np
 import io
 import os
 import secrets
+import tempfile
 from typing import Dict, List
 from collections import defaultdict
 
 from allocator import QuizStructure, allocate_quizzes, shuffle_all_quizzes
 from excel_handler import load_question_bank, FullQuestionBank
+from response_generator import generate_responses
+from answer_checker import (
+    load_response_sheet,
+    check_all_responses,
+    generate_scoring_report,
+)
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 
@@ -329,104 +336,128 @@ def create_formatted_excel(
     return output.getvalue()
 
 
-def main():
-    st.title("📝 Quiz Question Paper Generator")
-    st.markdown("Upload a question bank and generate randomized question papers for all students.")
+def _save_uploaded_temp(uploaded_file, prefix: str) -> str:
+    """Persist uploaded Streamlit file to a temporary .xlsx path."""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix=prefix) as tmp:
+        tmp.write(uploaded_file.getvalue())
+        return tmp.name
 
+
+def _make_excel_bytes_from_dataframe(df: pd.DataFrame, sheet_name: str) -> bytes:
+    """Serialize DataFrame into an in-memory Excel file."""
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name=sheet_name, index=False)
+    output.seek(0)
+    return output.getvalue()
+
+
+def _render_generation_tab():
+    """Part 1 UI: generate question papers."""
+    st.markdown("Upload a question bank and generate randomized question papers for all students.")
     st.divider()
 
-    # ========================================================================
-    # Step 1: Upload Question Bank
-    # ========================================================================
     st.header("1️⃣ Upload Question Bank")
-
     uploaded_file = st.file_uploader(
         "Upload Excel file (.xlsx)",
-        type=['xlsx'],
-        help="Excel with columns: question_no, question, option_a, option_b, option_c, option_d, answer, difficulty"
+        type=["xlsx"],
+        help="Excel with columns: question_no, question, option_a, option_b, option_c, option_d, answer, difficulty",
+        key="part1_question_bank",
     )
 
     question_bank = None
-    counts = {'hard': 0, 'medium': 0, 'easy': 0}
+    counts = {"hard": 0, "medium": 0, "easy": 0}
 
     if uploaded_file:
+        temp_path = None
         try:
-            with open("temp_upload.xlsx", "wb") as f:
-                f.write(uploaded_file.getvalue())
-
-            question_bank = load_question_bank("temp_upload.xlsx")
+            temp_path = _save_uploaded_temp(uploaded_file, "part1_qb_")
+            question_bank = load_question_bank(temp_path)
             counts = question_bank.count_by_difficulty()
             total = sum(counts.values())
 
             st.success(f"✅ Loaded {total} questions successfully!")
-
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Hard", counts.get('hard', 0))
-            col2.metric("Medium", counts.get('medium', 0))
-            col3.metric("Easy", counts.get('easy', 0))
+            col1.metric("Hard", counts.get("hard", 0))
+            col2.metric("Medium", counts.get("medium", 0))
+            col3.metric("Easy", counts.get("easy", 0))
             col4.metric("Total", total)
 
+            st.session_state["part1_question_bank_bytes"] = uploaded_file.getvalue()
         except Exception as e:
             st.error(f"❌ Error loading file: {str(e)}")
             question_bank = None
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
 
     st.divider()
 
-    # ========================================================================
-    # Step 2: Configuration
-    # ========================================================================
     st.header("2️⃣ Configuration")
-
     col1, col2 = st.columns(2)
-
     with col1:
         num_students = st.number_input(
             "Number of Students",
-            min_value=1, max_value=500, value=50,
-            help="How many question papers to generate"
+            min_value=1,
+            max_value=500,
+            value=50,
+            help="How many question papers to generate",
+            key="part1_num_students",
         )
-
     with col2:
         total_questions = st.number_input(
             "Questions per Quiz",
-            min_value=1, max_value=100, value=15,
-            help="Total questions in each student's quiz"
+            min_value=1,
+            max_value=100,
+            value=15,
+            help="Total questions in each student's quiz",
+            key="part1_total_questions",
         )
 
     st.divider()
-
-    # ========================================================================
-    # Step 3: Difficulty Distribution
-    # ========================================================================
     st.header("3️⃣ Difficulty Distribution")
-
     mode = st.radio(
         "Select mode:",
         ["Absolute (exact counts)", "Percentage (auto-calculate)"],
-        horizontal=True
+        horizontal=True,
+        key="part1_mode",
     )
 
     hard_count = medium_count = easy_count = 0
-
     if mode == "Absolute (exact counts)":
         col1, col2, col3 = st.columns(3)
         with col1:
-            hard_count = st.number_input("Hard Questions", min_value=0, max_value=total_questions,
-                                         value=min(4, counts.get('hard', 4)), key="hard_abs")
+            hard_count = st.number_input(
+                "Hard Questions",
+                min_value=0,
+                max_value=total_questions,
+                value=min(4, counts.get("hard", 4)),
+                key="part1_hard_abs",
+            )
         with col2:
-            medium_count = st.number_input("Medium Questions", min_value=0, max_value=total_questions,
-                                           value=min(6, counts.get('medium', 6)), key="medium_abs")
+            medium_count = st.number_input(
+                "Medium Questions",
+                min_value=0,
+                max_value=total_questions,
+                value=min(6, counts.get("medium", 6)),
+                key="part1_medium_abs",
+            )
         with col3:
-            easy_count = st.number_input("Easy Questions", min_value=0, max_value=total_questions,
-                                         value=min(5, counts.get('easy', 5)), key="easy_abs")
+            easy_count = st.number_input(
+                "Easy Questions",
+                min_value=0,
+                max_value=total_questions,
+                value=min(5, counts.get("easy", 5)),
+                key="part1_easy_abs",
+            )
     else:
         col1, col2, col3 = st.columns(3)
         with col1:
-            hard_pct = st.slider("Hard %", 0, 100, 27, key="hard_pct")
+            hard_pct = st.slider("Hard %", 0, 100, 27, key="part1_hard_pct")
         with col2:
-            medium_pct = st.slider("Medium %", 0, 100, 40, key="medium_pct")
+            medium_pct = st.slider("Medium %", 0, 100, 40, key="part1_medium_pct")
         with col3:
-            easy_pct = st.slider("Easy %", 0, 100, 33, key="easy_pct")
+            easy_pct = st.slider("Easy %", 0, 100, 33, key="part1_easy_pct")
 
         total_pct = hard_pct + medium_pct + easy_pct
         if total_pct != 100:
@@ -435,37 +466,36 @@ def main():
         hard_count = round(total_questions * hard_pct / 100)
         medium_count = round(total_questions * medium_pct / 100)
         easy_count = total_questions - hard_count - medium_count
+        st.info(
+            f"📊 Calculated: {hard_count} Hard + {medium_count} Medium + {easy_count} Easy = "
+            f"{hard_count + medium_count + easy_count} questions"
+        )
 
-        st.info(f"📊 Calculated: {hard_count} Hard + {medium_count} Medium + {easy_count} Easy = {hard_count + medium_count + easy_count} questions")
-
-    # Validation
     total_selected = hard_count + medium_count + easy_count
     if total_selected != total_questions:
         st.error(f"❌ Selected {total_selected} questions, but quiz requires {total_questions}")
 
     validation_errors = []
     if question_bank:
-        if hard_count > counts.get('hard', 0):
+        if hard_count > counts.get("hard", 0):
             validation_errors.append(f"Need {hard_count} hard questions, only {counts.get('hard', 0)} available")
-        if medium_count > counts.get('medium', 0):
-            validation_errors.append(f"Need {medium_count} medium questions, only {counts.get('medium', 0)} available")
-        if easy_count > counts.get('easy', 0):
+        if medium_count > counts.get("medium", 0):
+            validation_errors.append(
+                f"Need {medium_count} medium questions, only {counts.get('medium', 0)} available"
+            )
+        if easy_count > counts.get("easy", 0):
             validation_errors.append(f"Need {easy_count} easy questions, only {counts.get('easy', 0)} available")
 
     for error in validation_errors:
         st.error(f"❌ {error}")
 
     st.divider()
-
-    # ========================================================================
-    # Step 4: Randomization
-    # ========================================================================
     st.header("4️⃣ Randomization")
-
     use_fixed_seed = st.checkbox(
         "Use fixed seed (reproducible output)",
         value=False,
-        help="Enable this if you want the exact same allocation for identical inputs."
+        help="Enable this if you want the exact same allocation for identical inputs.",
+        key="part1_use_fixed_seed",
     )
     fixed_seed = None
     if use_fixed_seed:
@@ -474,91 +504,294 @@ def main():
             min_value=0,
             max_value=2_147_483_647,
             value=42,
-            step=1
+            step=1,
+            key="part1_seed_value",
         )
         st.caption("Same input + same seed -> same allocation.")
     else:
         st.caption("Each generation uses a fresh random seed.")
 
     st.divider()
-
-    # ========================================================================
-    # Step 5: Generate
-    # ========================================================================
     st.header("5️⃣ Generate Question Papers")
 
-    can_generate = (
-        question_bank is not None
-        and total_selected == total_questions
-        and len(validation_errors) == 0
-    )
+    can_generate = question_bank is not None and total_selected == total_questions and len(validation_errors) == 0
 
-    if st.button("🚀 Generate Question Papers", disabled=not can_generate, type="primary"):
+    if st.button("🚀 Generate Question Papers", disabled=not can_generate, type="primary", key="part1_generate"):
         with st.spinner("Generating question papers..."):
             try:
                 quiz_structure = QuizStructure(
                     hard_count=hard_count,
                     medium_count=medium_count,
-                    easy_count=easy_count
+                    easy_count=easy_count,
                 )
-
                 q_ids_by_diff = {
-                    'hard': question_bank.get_question_ids_by_difficulty('hard'),
-                    'medium': question_bank.get_question_ids_by_difficulty('medium'),
-                    'easy': question_bank.get_question_ids_by_difficulty('easy'),
+                    "hard": question_bank.get_question_ids_by_difficulty("hard"),
+                    "medium": question_bank.get_question_ids_by_difficulty("medium"),
+                    "easy": question_bank.get_question_ids_by_difficulty("easy"),
                 }
 
                 run_seed = int(fixed_seed) if use_fixed_seed else secrets.randbelow(2_147_483_647)
-
-                # Run allocation
                 allocation_matrix, usage_counts = allocate_quizzes(
                     q_ids_by_diff,
                     num_students=num_students,
                     quiz_structure=quiz_structure,
-                    seed=run_seed
+                    seed=run_seed,
                 )
-
-                # Shuffle
                 shuffled_matrix = shuffle_all_quizzes(allocation_matrix, base_seed=run_seed)
 
-                # Create formatted Excel with all sheets
                 excel_bytes = create_formatted_excel(
                     allocation_matrix=allocation_matrix,
                     shuffled_matrix=shuffled_matrix,
                     usage_counts=usage_counts,
-                    question_bank=question_bank
+                    question_bank=question_bank,
                 )
 
+                st.session_state["part1_question_papers_bytes"] = excel_bytes
                 st.success(f"✅ Generated {num_students} question papers!")
-
                 st.download_button(
                     label="📥 Download Question Papers (Excel)",
                     data=excel_bytes,
                     file_name="question_papers.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    type="primary"
+                    type="primary",
+                    key="part1_download_papers",
                 )
 
-                # Show stats
-                st.subheader("📊 Generation Statistics")
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Students", num_students)
                 col2.metric("Questions/Quiz", total_questions)
-                col3.metric("Total Sheets", num_students + 4)  # papers + answer key + alloc + shuffled + eval
+                col3.metric("Total Sheets", num_students + 5)  # sets + answer key + alloc + shuffled + eval + qbank
 
                 if use_fixed_seed:
                     st.caption(f"Seed used: {run_seed} (fixed)")
                 else:
                     st.caption(f"Seed used: {run_seed} (auto-generated for this run)")
 
-                st.caption("Sheets: Set_1 … Set_N, Answer_Key, Allocation_Table, Shuffled_Table, Evaluation")
-
+                st.caption(
+                    "Sheets: Set_1 … Set_N, Answer_Key, Allocation_Table, Shuffled_Table, Evaluation, Question_Bank"
+                )
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
 
-    # Cleanup temp file
-    if os.path.exists("temp_upload.xlsx"):
-        os.remove("temp_upload.xlsx")
+
+def _render_answer_checking_tab():
+    """Part 2 UI: generate responses and score submissions."""
+    st.markdown("Generate dummy responses and validate/score answer sheets.")
+    st.divider()
+
+    st.header("A️⃣ Generate Dummy Responses")
+    use_part1_assets = st.checkbox(
+        "Use Question Bank + Question Papers from Part 1 tab (if generated in this session)",
+        value=bool(
+            st.session_state.get("part1_question_bank_bytes") and st.session_state.get("part1_question_papers_bytes")
+        ),
+        key="part2_use_part1_assets",
+    )
+
+    gen_qb_upload = None
+    gen_qp_upload = None
+    if not use_part1_assets:
+        gen_qb_upload = st.file_uploader("Upload Question Bank (.xlsx)", type=["xlsx"], key="part2_gen_qb_upload")
+        gen_qp_upload = st.file_uploader("Upload Question Papers (.xlsx)", type=["xlsx"], key="part2_gen_qp_upload")
+    else:
+        if not st.session_state.get("part1_question_bank_bytes") or not st.session_state.get("part1_question_papers_bytes"):
+            st.warning("Part 1 files are not available in session. Upload files manually.")
+            use_part1_assets = False
+            gen_qb_upload = st.file_uploader("Upload Question Bank (.xlsx)", type=["xlsx"], key="part2_gen_qb_fallback")
+            gen_qp_upload = st.file_uploader(
+                "Upload Question Papers (.xlsx)", type=["xlsx"], key="part2_gen_qp_fallback"
+            )
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        gen_students = st.number_input("Students", min_value=1, max_value=500, value=70, key="part2_gen_students")
+    with col2:
+        correct_rate = st.slider("Correct %", 0, 100, 70, key="part2_correct_rate")
+    with col3:
+        wrong_rate = st.slider("Wrong %", 0, 100, 20, key="part2_wrong_rate")
+
+    blank_rate = 100 - correct_rate - wrong_rate
+    if blank_rate < 0:
+        st.error("❌ Correct% + Wrong% cannot exceed 100.")
+    else:
+        st.caption(f"Blank % (auto): {blank_rate}")
+
+    use_fixed_gen_seed = st.checkbox(
+        "Use fixed seed for dummy responses",
+        value=False,
+        key="part2_use_fixed_gen_seed",
+    )
+    gen_seed = None
+    if use_fixed_gen_seed:
+        gen_seed = st.number_input(
+            "Generator seed",
+            min_value=0,
+            max_value=2_147_483_647,
+            value=42,
+            step=1,
+            key="part2_gen_seed",
+        )
+
+    if st.button("🧪 Generate Dummy Responses", type="primary", key="part2_generate_responses"):
+        if blank_rate < 0:
+            st.error("Fix rates before generating responses.")
+        else:
+            temp_files = []
+            try:
+                if use_part1_assets:
+                    qb_bytes = st.session_state["part1_question_bank_bytes"]
+                    qp_bytes = st.session_state["part1_question_papers_bytes"]
+                else:
+                    if not gen_qb_upload or not gen_qp_upload:
+                        st.error("Upload both Question Bank and Question Papers.")
+                        return
+                    qb_bytes = gen_qb_upload.getvalue()
+                    qp_bytes = gen_qp_upload.getvalue()
+
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="part2_qb_") as qb_tmp:
+                    qb_tmp.write(qb_bytes)
+                    qb_path = qb_tmp.name
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="part2_qp_") as qp_tmp:
+                    qp_tmp.write(qp_bytes)
+                    qp_path = qp_tmp.name
+                temp_files.extend([qb_path, qp_path])
+
+                question_bank = load_question_bank(qb_path)
+                response_df = generate_responses(
+                    question_papers_path=qp_path,
+                    question_bank=question_bank,
+                    num_students=int(gen_students),
+                    correct_rate=float(correct_rate) / 100.0,
+                    wrong_rate=float(wrong_rate) / 100.0,
+                    blank_rate=float(blank_rate) / 100.0,
+                    seed=int(gen_seed) if use_fixed_gen_seed else None,
+                )
+
+                response_bytes = _make_excel_bytes_from_dataframe(response_df, "Responses")
+                st.session_state["part2_generated_responses_bytes"] = response_bytes
+
+                st.success(f"✅ Generated dummy responses for {len(response_df)} students.")
+                st.download_button(
+                    "📥 Download student_responses.xlsx",
+                    data=response_bytes,
+                    file_name="student_responses.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="part2_download_responses",
+                )
+                st.caption(f"Shape: {response_df.shape[0]} rows × {response_df.shape[1]} columns")
+            except Exception as e:
+                st.error(f"❌ Error: {str(e)}")
+            finally:
+                for path in temp_files:
+                    if os.path.exists(path):
+                        os.remove(path)
+
+    st.divider()
+    st.header("B️⃣ Check & Score Responses")
+
+    use_generated_responses = st.checkbox(
+        "Use generated responses from section A (if available)",
+        value=bool(st.session_state.get("part2_generated_responses_bytes")),
+        key="part2_use_generated_responses",
+    )
+
+    chk_qb_upload = st.file_uploader("Upload Question Bank (.xlsx)", type=["xlsx"], key="part2_chk_qb_upload")
+    chk_qp_upload = st.file_uploader("Upload Question Papers (.xlsx)", type=["xlsx"], key="part2_chk_qp_upload")
+    chk_resp_upload = None
+    if not use_generated_responses:
+        chk_resp_upload = st.file_uploader("Upload Student Responses (.xlsx)", type=["xlsx"], key="part2_chk_resp_upload")
+
+    pass_threshold = st.number_input(
+        "Pass Threshold (%)",
+        min_value=0.0,
+        max_value=100.0,
+        value=40.0,
+        step=1.0,
+        key="part2_pass_threshold",
+    )
+
+    if st.button("✅ Check & Score", type="primary", key="part2_check_score"):
+        if not chk_qb_upload or not chk_qp_upload:
+            st.error("Upload Question Bank and Question Papers for checking.")
+        elif (not use_generated_responses) and (not chk_resp_upload):
+            st.error("Upload Student Responses or enable generated responses.")
+        else:
+            temp_files = []
+            report_temp_path = None
+            try:
+                qb_bytes = chk_qb_upload.getvalue()
+                qp_bytes = chk_qp_upload.getvalue()
+                if use_generated_responses:
+                    if not st.session_state.get("part2_generated_responses_bytes"):
+                        st.error("No generated responses in session. Upload response file instead.")
+                        return
+                    resp_bytes = st.session_state["part2_generated_responses_bytes"]
+                else:
+                    resp_bytes = chk_resp_upload.getvalue()
+
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="part2_chk_qb_") as qb_tmp:
+                    qb_tmp.write(qb_bytes)
+                    qb_path = qb_tmp.name
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="part2_chk_qp_") as qp_tmp:
+                    qp_tmp.write(qp_bytes)
+                    qp_path = qp_tmp.name
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="part2_chk_resp_") as resp_tmp:
+                    resp_tmp.write(resp_bytes)
+                    resp_path = resp_tmp.name
+                temp_files.extend([qb_path, qp_path, resp_path])
+
+                question_bank = load_question_bank(qb_path)
+                response_df = load_response_sheet(resp_path)
+                report = check_all_responses(
+                    response_df=response_df,
+                    question_papers_path=qp_path,
+                    question_bank=question_bank,
+                    pass_threshold=float(pass_threshold),
+                )
+
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="part2_report_") as report_tmp:
+                    report_temp_path = report_tmp.name
+                generate_scoring_report(report, report_temp_path)
+                with open(report_temp_path, "rb") as f:
+                    report_bytes = f.read()
+
+                st.success("✅ Scoring completed.")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Average Score (%)", f"{report.avg_score:.2f}")
+                col2.metric("Median Score (%)", f"{report.median_score:.2f}")
+                col3.metric("Pass Rate (%)", f"{report.pass_rate:.2f}")
+
+                if report.validation_issues:
+                    st.warning(f"⚠️ Validation issues found for {len(report.validation_issues)} students.")
+                else:
+                    st.success("No validation issues found.")
+
+                st.download_button(
+                    "📥 Download scoring_report.xlsx",
+                    data=report_bytes,
+                    file_name="scoring_report.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="part2_download_report",
+                )
+            except Exception as e:
+                st.error(f"❌ Error: {str(e)}")
+            finally:
+                for path in temp_files:
+                    if os.path.exists(path):
+                        os.remove(path)
+                if report_temp_path and os.path.exists(report_temp_path):
+                    os.remove(report_temp_path)
+
+
+def main():
+    st.title("📝 Quiz Generator")
+    part1_tab, part2_tab = st.tabs(["Part 1: Generate Papers", "Part 2: Answer Checking"])
+
+    with part1_tab:
+        _render_generation_tab()
+
+    with part2_tab:
+        _render_answer_checking_tab()
 
 
 if __name__ == "__main__":
