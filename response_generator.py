@@ -3,7 +3,7 @@ Response Generator Module
 
 Generates a dummy student response sheet (Excel) simulating Google Form output.
 Each student answers only the questions from their assigned set.
-Simulates realistic behavior: ~70% correct, ~20% wrong, ~10% blank.
+All assigned questions are treated as compulsory (no blank responses).
 """
 
 import random
@@ -151,7 +151,7 @@ def generate_responses(
         num_students: Number of student responses to generate
         correct_rate: Probability of answering correctly (~70%)
         wrong_rate: Probability of answering wrong (~20%)
-        blank_rate: Probability of leaving blank (~10%)
+        blank_rate: Deprecated; kept for compatibility. Blanks are not generated.
         seed: Random seed for reproducibility
 
     Returns:
@@ -208,8 +208,9 @@ def generate_responses(
                 wrong_options = [o for o in all_options if o != correct_answer]
                 row[f'Q{q_no}'] = rng.choice(wrong_options)
             else:
-                # Leave blank (student skipped)
-                row[f'Q{q_no}'] = None
+                # Compulsory response: remaining probability also maps to wrong.
+                wrong_options = [o for o in all_options if o != correct_answer]
+                row[f'Q{q_no}'] = rng.choice(wrong_options)
 
         rows.append(row)
 

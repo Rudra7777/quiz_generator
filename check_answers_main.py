@@ -126,17 +126,17 @@ def run_generate(args):
 
     # Generate responses
     print(f"\n[2/3] Generating {args.students} student responses...")
-    print(f"  Rates: {args.correct_rate:.0%} correct, {args.wrong_rate:.0%} wrong, "
-          f"{1 - args.correct_rate - args.wrong_rate:.0%} blank")
+    remaining_wrong = 1 - args.correct_rate - args.wrong_rate
+    effective_wrong = args.wrong_rate + max(0.0, remaining_wrong)
+    print(f"  Rates: {args.correct_rate:.0%} correct, {effective_wrong:.0%} wrong (compulsory answers)")
 
-    blank_rate = 1.0 - args.correct_rate - args.wrong_rate
     response_df = generate_responses(
         question_papers_path=args.question_papers,
         question_bank=question_bank,
         num_students=args.students,
         correct_rate=args.correct_rate,
         wrong_rate=args.wrong_rate,
-        blank_rate=blank_rate,
+        blank_rate=0.0,
         seed=args.seed
     )
 

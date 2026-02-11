@@ -47,22 +47,8 @@ class StudentReport:
     score_percent: float
 
     @property
-    def missed(self) -> int:
-        return self.unanswered
-
-    @property
     def set_no(self) -> str:
         return self.validation.set_no
-
-    @property
-    def score(self) -> int:
-        """Obtained marks (1 mark per correct answer)."""
-        return self.correct
-
-    @property
-    def max_marks(self) -> int:
-        """Maximum possible marks for the assigned quiz."""
-        return self.assigned
 
 
 @dataclass
@@ -198,14 +184,16 @@ def check_all_responses(
         for q_no in assigned_qnos:
             answer = answered.get(q_no)
             if answer is None:
-                unanswered += 1
+                # Compulsory forms: unanswered is treated as wrong.
                 continue
             if answer == qno_to_answer[q_no]:
                 correct += 1
             else:
                 wrong += 1
 
-        attempted = correct + wrong
+        wrong += (len(assigned_qnos) - (correct + wrong))
+        attempted = len(assigned_qnos)
+        unanswered = 0
         score_percent = round((correct / len(assigned_qnos)) * 100, 2) if assigned_qnos else 0.0
 
         validation = ValidationResult(set_no=set_no, extra_questions=extra_questions)
@@ -255,14 +243,9 @@ def generate_scoring_report(report: ScoringReport, output_path: str) -> str:
                 "Set": r.set_no,
                 "Assigned": r.assigned,
                 "Attempted": r.attempted,
-                "Score": r.score,
-                "Max Marks": r.max_marks,
                 "Correct": r.correct,
                 "Wrong": r.wrong,
-                "Unanswered": r.unanswered,
-                "Score (%)": r.score_percent,
                 "Extra Answers": r.validation.extra_count,
-                "Missed": r.missed,
             }
         )
     scores_df = pd.DataFrame(scores_rows)

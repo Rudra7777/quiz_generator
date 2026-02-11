@@ -671,11 +671,11 @@ def _render_answer_checking_tab():
     with col3:
         wrong_rate = st.slider("Wrong %", 0, 100, 20, key="part2_wrong_rate")
 
-    blank_rate = 100 - correct_rate - wrong_rate
-    if blank_rate < 0:
+    extra_rate = 100 - correct_rate - wrong_rate
+    if extra_rate < 0:
         st.error("❌ Correct% + Wrong% cannot exceed 100.")
     else:
-        st.caption(f"Blank % (auto): {blank_rate}")
+        st.caption(f"Remaining {extra_rate}% is treated as wrong (all assigned questions are compulsory).")
 
     use_fixed_gen_seed = st.checkbox(
         "Use fixed seed for dummy responses",
@@ -694,7 +694,7 @@ def _render_answer_checking_tab():
         )
 
     if st.button("🧪 Generate Dummy Responses", type="primary", key="part2_generate_responses"):
-        if blank_rate < 0:
+        if extra_rate < 0:
             st.error("Fix rates before generating responses.")
         else:
             temp_files = []
@@ -719,7 +719,7 @@ def _render_answer_checking_tab():
                     num_students=int(gen_students),
                     correct_rate=float(correct_rate) / 100.0,
                     wrong_rate=float(wrong_rate) / 100.0,
-                    blank_rate=float(blank_rate) / 100.0,
+                    blank_rate=0.0,
                     seed=int(gen_seed) if use_fixed_gen_seed else None,
                 )
 
