@@ -14,6 +14,37 @@ from pathlib import Path
 from excel_handler import load_question_bank, FullQuestionBank
 
 
+def _read_set_sheet(question_papers_path: str, sheet_name: str) -> pd.DataFrame:
+    """
+    Read a Set_N sheet robustly across formats.
+
+    Supports both:
+    - plain sheets where header is on first row
+    - styled sheets where title row exists and header appears later
+    """
+    for header_row in (0, 1, 2, 3, 4, 5):
+        try:
+            df = pd.read_excel(question_papers_path, sheet_name=sheet_name, header=header_row)
+        except Exception:
+            continue
+
+        normalized = {
+            str(col).strip().lower().replace(" ", "_").replace(".", ""): col
+            for col in df.columns
+        }
+        q_col = normalized.get("question")
+
+        if q_col is None:
+            continue
+
+        out = df.rename(columns={q_col: "Question"}).copy()
+        out = out[out["Question"].notna()]
+        if len(out) > 0:
+            return out
+
+    raise ValueError(f"Could not parse '{sheet_name}' with a valid Question column.")
+
+
 def extract_set_questions(question_papers_path: str) -> Dict[str, List[Tuple[int, str]]]:
     """
     Extract each student's assigned questions from the question papers Excel.
@@ -39,7 +70,7 @@ def extract_set_questions(question_papers_path: str) -> Dict[str, List[Tuple[int
 
     for sheet_name in set_sheets:
         # Read the question paper sheet
-        paper_df = pd.read_excel(question_papers_path, sheet_name=sheet_name)
+        paper_df = _read_set_sheet(question_papers_path, sheet_name)
 
         # Get answer row for this set from answer key
         set_row = answer_key_df[answer_key_df['Set'] == sheet_name]
@@ -84,7 +115,7 @@ def map_paper_to_bank_questions(
     set_to_question_nos = {}
 
     for sheet_name in set_sheets:
-        paper_df = pd.read_excel(question_papers_path, sheet_name=sheet_name)
+        paper_df = _read_set_sheet(question_papers_path, sheet_name)
         question_nos = []
 
         for _, row in paper_df.iterrows():
@@ -134,7 +165,6 @@ def generate_responses(
     set_to_question_nos = map_paper_to_bank_questions(
         question_papers_path, question_bank
     )
-    set_questions = extract_set_questions(question_papers_path)
 
     # Get available set names
     set_names = sorted(set_to_question_nos.keys(),
