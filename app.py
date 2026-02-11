@@ -352,6 +352,30 @@ def _make_excel_bytes_from_dataframe(df: pd.DataFrame, sheet_name: str) -> bytes
     return output.getvalue()
 
 
+def _load_question_bank_from_question_papers(question_papers_path: str) -> FullQuestionBank:
+    """Load embedded Question_Bank sheet from question_papers.xlsx."""
+    temp_path = None
+    try:
+        try:
+            question_bank_df = pd.read_excel(question_papers_path, sheet_name="Question_Bank")
+        except Exception as exc:
+            raise ValueError(
+                "Question_Bank sheet not found in question papers. "
+                "Regenerate papers with the latest app/CLI."
+            ) from exc
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="embedded_qb_") as tmp:
+            temp_path = tmp.name
+
+        with pd.ExcelWriter(temp_path, engine="openpyxl") as writer:
+            question_bank_df.to_excel(writer, index=False)
+
+        return load_question_bank(temp_path)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
 def _render_generation_tab():
     """Part 1 UI: generate question papers."""
     st.markdown("Upload a question bank and generate randomized question papers for all students.")
@@ -581,23 +605,18 @@ def _render_answer_checking_tab():
 
     st.header("A️⃣ Generate Dummy Responses")
     use_part1_assets = st.checkbox(
-        "Use Question Bank + Question Papers from Part 1 tab (if generated in this session)",
-        value=bool(
-            st.session_state.get("part1_question_bank_bytes") and st.session_state.get("part1_question_papers_bytes")
-        ),
+        "Use Question Papers from Part 1 tab (if generated in this session)",
+        value=bool(st.session_state.get("part1_question_papers_bytes")),
         key="part2_use_part1_assets",
     )
 
-    gen_qb_upload = None
     gen_qp_upload = None
     if not use_part1_assets:
-        gen_qb_upload = st.file_uploader("Upload Question Bank (.xlsx)", type=["xlsx"], key="part2_gen_qb_upload")
         gen_qp_upload = st.file_uploader("Upload Question Papers (.xlsx)", type=["xlsx"], key="part2_gen_qp_upload")
     else:
-        if not st.session_state.get("part1_question_bank_bytes") or not st.session_state.get("part1_question_papers_bytes"):
-            st.warning("Part 1 files are not available in session. Upload files manually.")
+        if not st.session_state.get("part1_question_papers_bytes"):
+            st.warning("Part 1 question papers are not available in session. Upload file manually.")
             use_part1_assets = False
-            gen_qb_upload = st.file_uploader("Upload Question Bank (.xlsx)", type=["xlsx"], key="part2_gen_qb_fallback")
             gen_qp_upload = st.file_uploader(
                 "Upload Question Papers (.xlsx)", type=["xlsx"], key="part2_gen_qp_fallback"
             )
@@ -639,24 +658,19 @@ def _render_answer_checking_tab():
             temp_files = []
             try:
                 if use_part1_assets:
-                    qb_bytes = st.session_state["part1_question_bank_bytes"]
                     qp_bytes = st.session_state["part1_question_papers_bytes"]
                 else:
-                    if not gen_qb_upload or not gen_qp_upload:
-                        st.error("Upload both Question Bank and Question Papers.")
+                    if not gen_qp_upload:
+                        st.error("Upload Question Papers.")
                         return
-                    qb_bytes = gen_qb_upload.getvalue()
                     qp_bytes = gen_qp_upload.getvalue()
 
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="part2_qb_") as qb_tmp:
-                    qb_tmp.write(qb_bytes)
-                    qb_path = qb_tmp.name
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="part2_qp_") as qp_tmp:
                     qp_tmp.write(qp_bytes)
                     qp_path = qp_tmp.name
-                temp_files.extend([qb_path, qp_path])
+                temp_files.append(qp_path)
 
-                question_bank = load_question_bank(qb_path)
+                question_bank = _load_question_bank_from_question_papers(qp_path)
                 response_df = generate_responses(
                     question_papers_path=qp_path,
                     question_bank=question_bank,
@@ -695,7 +709,6 @@ def _render_answer_checking_tab():
         key="part2_use_generated_responses",
     )
 
-    chk_qb_upload = st.file_uploader("Upload Question Bank (.xlsx)", type=["xlsx"], key="part2_chk_qb_upload")
     chk_qp_upload = st.file_uploader("Upload Question Papers (.xlsx)", type=["xlsx"], key="part2_chk_qp_upload")
     chk_resp_upload = None
     if not use_generated_responses:
@@ -711,15 +724,14 @@ def _render_answer_checking_tab():
     )
 
     if st.button("✅ Check & Score", type="primary", key="part2_check_score"):
-        if not chk_qb_upload or not chk_qp_upload:
-            st.error("Upload Question Bank and Question Papers for checking.")
+        if not chk_qp_upload:
+            st.error("Upload Question Papers for checking.")
         elif (not use_generated_responses) and (not chk_resp_upload):
             st.error("Upload Student Responses or enable generated responses.")
         else:
             temp_files = []
             report_temp_path = None
             try:
-                qb_bytes = chk_qb_upload.getvalue()
                 qp_bytes = chk_qp_upload.getvalue()
                 if use_generated_responses:
                     if not st.session_state.get("part2_generated_responses_bytes"):
@@ -729,18 +741,15 @@ def _render_answer_checking_tab():
                 else:
                     resp_bytes = chk_resp_upload.getvalue()
 
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="part2_chk_qb_") as qb_tmp:
-                    qb_tmp.write(qb_bytes)
-                    qb_path = qb_tmp.name
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="part2_chk_qp_") as qp_tmp:
                     qp_tmp.write(qp_bytes)
                     qp_path = qp_tmp.name
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="part2_chk_resp_") as resp_tmp:
                     resp_tmp.write(resp_bytes)
                     resp_path = resp_tmp.name
-                temp_files.extend([qb_path, qp_path, resp_path])
+                temp_files.extend([qp_path, resp_path])
 
-                question_bank = load_question_bank(qb_path)
+                question_bank = _load_question_bank_from_question_papers(qp_path)
                 response_df = load_response_sheet(resp_path)
                 report = check_all_responses(
                     response_df=response_df,
