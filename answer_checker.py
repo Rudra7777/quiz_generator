@@ -44,7 +44,6 @@ class StudentReport:
     correct: int
     wrong: int
     unanswered: int
-    score_percent: float
 
     @property
     def set_no(self) -> str:
@@ -61,35 +60,16 @@ class ScoringReport:
     median_score: float
     pass_count: int
     pass_rate: float
-    pass_threshold: float = 40.0
+    pass_threshold: float = 6.0
 
     def grade_distribution(self) -> Dict[str, int]:
-        """Return grade buckets as counts."""
-        buckets = {
-            "90-100%": 0,
-            "80-89%": 0,
-            "70-79%": 0,
-            "60-69%": 0,
-            "50-59%": 0,
-            "40-49%": 0,
-            "Below 40%": 0,
-        }
+        """Return distribution by obtained marks (Correct / Max Marks)."""
+        buckets: Dict[str, int] = {}
         for report in self.student_reports:
-            score = report.score_percent
-            if score >= 90:
-                buckets["90-100%"] += 1
-            elif score >= 80:
-                buckets["80-89%"] += 1
-            elif score >= 70:
-                buckets["70-79%"] += 1
-            elif score >= 60:
-                buckets["60-69%"] += 1
-            elif score >= 50:
-                buckets["50-59%"] += 1
-            elif score >= 40:
-                buckets["40-49%"] += 1
-            else:
-                buckets["Below 40%"] += 1
+            key = f"{report.correct}/{report.assigned}"
+            buckets[key] = buckets.get(key, 0) + 1
+        # Sort by marks descending for readability.
+        buckets = dict(sorted(buckets.items(), key=lambda kv: int(kv[0].split("/")[0]), reverse=True))
         return buckets
 
 
@@ -152,7 +132,7 @@ def check_all_responses(
     response_df: pd.DataFrame,
     question_papers_path: str,
     question_bank: FullQuestionBank,
-    pass_threshold: float = 40.0,
+    pass_threshold: float = 6.0,
 ) -> ScoringReport:
     """
     Validate and score all student responses.
@@ -194,7 +174,6 @@ def check_all_responses(
         wrong += (len(assigned_qnos) - (correct + wrong))
         attempted = len(assigned_qnos)
         unanswered = 0
-        score_percent = round((correct / len(assigned_qnos)) * 100, 2) if assigned_qnos else 0.0
 
         validation = ValidationResult(set_no=set_no, extra_questions=extra_questions)
         student_reports.append(
@@ -206,14 +185,13 @@ def check_all_responses(
                 correct=correct,
                 wrong=wrong,
                 unanswered=unanswered,
-                score_percent=score_percent,
             )
         )
 
-    score_series = pd.Series([r.score_percent for r in student_reports], dtype=float)
+    score_series = pd.Series([r.correct for r in student_reports], dtype=float)
     avg_score = round(float(score_series.mean()), 2) if len(score_series) else 0.0
     median_score = round(float(score_series.median()), 2) if len(score_series) else 0.0
-    pass_count = sum(1 for r in student_reports if r.score_percent >= pass_threshold)
+    pass_count = sum(1 for r in student_reports if r.correct >= pass_threshold)
     pass_rate = round((pass_count / len(student_reports)) * 100, 2) if student_reports else 0.0
 
     validation_issues = [r for r in student_reports if r.validation.extra_count > 0]
@@ -250,17 +228,20 @@ def generate_scoring_report(report: ScoringReport, output_path: str) -> str:
         )
     scores_df = pd.DataFrame(scores_rows)
 
+    max_marks = scores_df["Assigned"].mode().iloc[0] if not scores_df.empty else 0
+
     summary_rows = [
         {"Metric": "Total Students", "Value": len(report.student_reports)},
-        {"Metric": "Average Score (%)", "Value": report.avg_score},
-        {"Metric": "Median Score (%)", "Value": report.median_score},
-        {"Metric": f"Pass Count (≥{int(report.pass_threshold)}%)", "Value": report.pass_count},
+        {"Metric": "Max Marks (per student)", "Value": max_marks},
+        {"Metric": "Average Correct (marks)", "Value": report.avg_score},
+        {"Metric": "Median Correct (marks)", "Value": report.median_score},
+        {"Metric": f"Pass Count (≥{int(report.pass_threshold)} marks)", "Value": report.pass_count},
         {"Metric": "Pass Rate (%)", "Value": report.pass_rate},
         {"Metric": "---", "Value": "---"},
-        {"Metric": "Grade Distribution", "Value": None},
+        {"Metric": "Score Distribution (Correct/Max)", "Value": None},
     ]
-    for grade, count in report.grade_distribution().items():
-        summary_rows.append({"Metric": grade, "Value": count})
+    for marks, count in report.grade_distribution().items():
+        summary_rows.append({"Metric": marks, "Value": count})
     summary_df = pd.DataFrame(summary_rows)
 
     if report.validation_issues:

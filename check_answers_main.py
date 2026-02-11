@@ -186,11 +186,15 @@ def run_check(args):
     report = check_all_responses(response_df, args.question_papers, question_bank)
 
     # Print summary
+    max_marks = report.student_reports[0].assigned if report.student_reports else 0
     print(f"\n  📊 Results:")
     print(f"     Students:       {len(report.student_reports)}")
-    print(f"     Average Score:  {report.avg_score}%")
-    print(f"     Median Score:   {report.median_score}%")
-    print(f"     Pass Rate:      {report.pass_rate}% ({report.pass_count}/{len(report.student_reports)})")
+    print(f"     Average Correct:{report.avg_score}/{max_marks}")
+    print(f"     Median Correct: {report.median_score}/{max_marks}")
+    print(
+        f"     Pass Rate:      {report.pass_rate}% "
+        f"({report.pass_count}/{len(report.student_reports)}, threshold: {int(report.pass_threshold)} marks)"
+    )
 
     issues = report.validation_issues
     if issues:

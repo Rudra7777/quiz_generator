@@ -645,23 +645,8 @@ def _render_answer_checking_tab():
     st.markdown("Generate dummy responses and validate/score answer sheets.")
     st.divider()
 
-    st.header("A️⃣ Generate Dummy Responses")
-    use_part1_assets = st.checkbox(
-        "Use Question Papers from Part 1 tab (if generated in this session)",
-        value=bool(st.session_state.get("part1_question_papers_bytes")),
-        key="part2_use_part1_assets",
-    )
-
-    gen_qp_upload = None
-    if not use_part1_assets:
-        gen_qp_upload = st.file_uploader("Upload Question Papers (.xlsx)", type=["xlsx"], key="part2_gen_qp_upload")
-    else:
-        if not st.session_state.get("part1_question_papers_bytes"):
-            st.warning("Part 1 question papers are not available in session. Upload file manually.")
-            use_part1_assets = False
-            gen_qp_upload = st.file_uploader(
-                "Upload Question Papers (.xlsx)", type=["xlsx"], key="part2_gen_qp_fallback"
-            )
+    st.header("Generate Dummy Responses")
+    gen_qp_upload = st.file_uploader("Upload Question Papers (.xlsx)", type=["xlsx"], key="part2_gen_qp_upload")
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -699,13 +684,10 @@ def _render_answer_checking_tab():
         else:
             temp_files = []
             try:
-                if use_part1_assets:
-                    qp_bytes = st.session_state["part1_question_papers_bytes"]
-                else:
-                    if not gen_qp_upload:
-                        st.error("Upload Question Papers.")
-                        return
-                    qp_bytes = gen_qp_upload.getvalue()
+                if not gen_qp_upload:
+                    st.error("Upload Question Papers.")
+                    return
+                qp_bytes = gen_qp_upload.getvalue()
 
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="part2_qp_") as qp_tmp:
                     qp_tmp.write(qp_bytes)
@@ -743,24 +725,16 @@ def _render_answer_checking_tab():
                         os.remove(path)
 
     st.divider()
-    st.header("B️⃣ Check & Score Responses")
-
-    use_generated_responses = st.checkbox(
-        "Use generated responses from section A (if available)",
-        value=bool(st.session_state.get("part2_generated_responses_bytes")),
-        key="part2_use_generated_responses",
-    )
+    st.header("Check & Score Responses")
 
     chk_qp_upload = st.file_uploader("Upload Question Papers (.xlsx)", type=["xlsx"], key="part2_chk_qp_upload")
-    chk_resp_upload = None
-    if not use_generated_responses:
-        chk_resp_upload = st.file_uploader("Upload Student Responses (.xlsx)", type=["xlsx"], key="part2_chk_resp_upload")
+    chk_resp_upload = st.file_uploader("Upload Student Responses (.xlsx)", type=["xlsx"], key="part2_chk_resp_upload")
 
     pass_threshold = st.number_input(
-        "Pass Threshold (%)",
+        "Pass Marks (Correct Answers)",
         min_value=0.0,
-        max_value=100.0,
-        value=40.0,
+        max_value=200.0,
+        value=6.0,
         step=1.0,
         key="part2_pass_threshold",
     )
@@ -768,20 +742,14 @@ def _render_answer_checking_tab():
     if st.button("✅ Check & Score", type="primary", key="part2_check_score"):
         if not chk_qp_upload:
             st.error("Upload Question Papers for checking.")
-        elif (not use_generated_responses) and (not chk_resp_upload):
-            st.error("Upload Student Responses or enable generated responses.")
+        elif not chk_resp_upload:
+            st.error("Upload Student Responses.")
         else:
             temp_files = []
             report_temp_path = None
             try:
                 qp_bytes = chk_qp_upload.getvalue()
-                if use_generated_responses:
-                    if not st.session_state.get("part2_generated_responses_bytes"):
-                        st.error("No generated responses in session. Upload response file instead.")
-                        return
-                    resp_bytes = st.session_state["part2_generated_responses_bytes"]
-                else:
-                    resp_bytes = chk_resp_upload.getvalue()
+                resp_bytes = chk_resp_upload.getvalue()
 
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="part2_chk_qp_") as qp_tmp:
                     qp_tmp.write(qp_bytes)
@@ -807,9 +775,10 @@ def _render_answer_checking_tab():
                     report_bytes = f.read()
 
                 st.success("✅ Scoring completed.")
+                max_marks = report.student_reports[0].assigned if report.student_reports else 0
                 col1, col2, col3 = st.columns(3)
-                col1.metric("Average Score (%)", f"{report.avg_score:.2f}")
-                col2.metric("Median Score (%)", f"{report.median_score:.2f}")
+                col1.metric("Average Correct", f"{report.avg_score:.2f}/{max_marks}")
+                col2.metric("Median Correct", f"{report.median_score:.2f}/{max_marks}")
                 col3.metric("Pass Rate (%)", f"{report.pass_rate:.2f}")
 
                 if report.validation_issues:

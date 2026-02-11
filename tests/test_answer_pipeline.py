@@ -29,19 +29,20 @@ def test_regression_existing_response_sheet():
     )
 
     assert len(report.student_reports) == 70
-    assert report.avg_score == 71.71
-    assert report.median_score == 73.33
+    assert report.avg_score == 10.76
+    assert report.median_score == 11.0
     assert report.pass_rate == 100.0
     assert report.pass_count == 70
     assert len(report.validation_issues) == 0
     assert report.grade_distribution() == {
-        "90-100%": 5,
-        "80-89%": 18,
-        "70-79%": 16,
-        "60-69%": 25,
-        "50-59%": 5,
-        "40-49%": 1,
-        "Below 40%": 0,
+        "14/15": 5,
+        "13/15": 4,
+        "12/15": 14,
+        "11/15": 16,
+        "10/15": 15,
+        "9/15": 10,
+        "8/15": 5,
+        "7/15": 1,
     }
 
 
@@ -77,7 +78,9 @@ def test_seeded_generation_is_deterministic():
     )
     assert len(report.validation_issues) == 0
     assert all(r.assigned == 15 for r in report.student_reports)
-    assert all(r.correct + r.wrong + r.unanswered == r.assigned for r in report.student_reports)
+    assert all(r.attempted == r.assigned for r in report.student_reports)
+    assert all(r.unanswered == 0 for r in report.student_reports)
+    assert all(r.correct + r.wrong == r.assigned for r in report.student_reports)
 
 
 def test_validation_flags_extra_answer_on_unassigned_question(tmp_path: Path):
