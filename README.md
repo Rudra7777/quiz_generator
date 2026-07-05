@@ -18,6 +18,19 @@ A web-based quiz allocation system that generates randomized question papers wit
 
 ```bash
 pip install -r requirements.txt
+```
+
+Two web UIs are available (both share the same engine and `excel_export.py` helpers):
+
+**Reflex UI (recommended)** — sidebar multi-page app with Generate / Evaluate pages:
+
+```bash
+reflex run
+```
+
+**Streamlit UI** — original two-tab app:
+
+```bash
 streamlit run app.py
 ```
 
