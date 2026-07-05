@@ -1,4 +1,5 @@
 streamlit
+reflex
 pandas
 openpyxl
 numpy
