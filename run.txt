@@ -1,0 +1,56 @@
+HOW TO RUN — Quiz Generator & Evaluator
+========================================
+
+Input files live in the `input/` folder:
+  - input/question_bank.xlsx      (70 questions: 12 Hard, 30 Medium, 28 Easy)
+  - input/question_bank_72.xlsx   (72 questions: 12 Hard, 30 Medium, 30 Easy)
+
+A question bank Excel must have these columns:
+  question_no, question, option_a, option_b, option_c, option_d, answer (A/B/C/D), difficulty (H/M/L)
+
+
+1. SETUP (do this once)
+-----------------------
+  pip install -r requirements.txt
+
+
+2. WEB APP — REFLEX UI (recommended)
+------------------------------------
+  reflex run
+
+  Then open http://localhost:3000
+  - "Generate Papers" page: upload a bank from input/, configure, download question_papers.xlsx
+  - "Evaluate Answers" page: generate dummy responses, then check & score, download scoring_report.xlsx
+
+
+3. WEB APP — STREAMLIT UI (original)
+------------------------------------
+  streamlit run app.py
+
+  Same two-part flow as the Reflex app, in a two-tab layout.
+
+
+4. COMMAND LINE
+---------------
+  Generate question papers:
+    python main.py --input input/question_bank.xlsx --students 50 --hard 4 --medium 6 --easy 5
+    (add --seed 42 for a reproducible allocation; omit it for a fresh random run)
+
+  Generate dummy student responses:
+    python check_answers_main.py generate \
+        --question-bank input/question_bank_72.xlsx \
+        --question-papers output/question_papers.xlsx \
+        --students 70 \
+        --output output/student_responses.xlsx
+
+  Check & score responses:
+    python check_answers_main.py check \
+        --question-bank input/question_bank_72.xlsx \
+        --question-papers output/question_papers.xlsx \
+        --responses output/student_responses.xlsx \
+        --output output/scoring_report.xlsx
+
+
+5. TESTS
+--------
+  pytest -q

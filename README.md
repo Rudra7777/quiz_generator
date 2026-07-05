@@ -70,8 +70,8 @@ The generated Excel contains:
 
 ## Sample Files
 
-- `question_bank.xlsx` - 70 questions (12H, 30M, 28E)
-- `question_bank_72.xlsx` - 72 questions (12H, 30M, 30E)
+- `input/question_bank.xlsx` - 70 questions (12H, 30M, 28E)
+- `input/question_bank_72.xlsx` - 72 questions (12H, 30M, 30E)
 
 ## Tech Stack
 

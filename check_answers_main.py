@@ -7,13 +7,13 @@ Two subcommands:
 
 Usage:
     python check_answers_main.py generate \
-        --question-bank question_bank_72.xlsx \
+        --question-bank input/question_bank_72.xlsx \
         --question-papers output/question_papers.xlsx \
         --students 70 \
         --output output/student_responses.xlsx
 
     python check_answers_main.py check \
-        --question-bank question_bank_72.xlsx \
+        --question-bank input/question_bank_72.xlsx \
         --question-papers output/question_papers.xlsx \
         --responses output/student_responses.xlsx \
         --output output/scoring_report.xlsx
@@ -38,8 +38,8 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:
-  python check_answers_main.py generate --question-bank question_bank_72.xlsx --question-papers output/question_papers.xlsx --students 70
-  python check_answers_main.py check --question-bank question_bank_72.xlsx --question-papers output/question_papers.xlsx --responses output/student_responses.xlsx
+  python check_answers_main.py generate --question-bank input/question_bank_72.xlsx --question-papers output/question_papers.xlsx --students 70
+  python check_answers_main.py check --question-bank input/question_bank_72.xlsx --question-papers output/question_papers.xlsx --responses output/student_responses.xlsx
         '''
     )
 

@@ -13,7 +13,7 @@ from response_generator import generate_responses, map_paper_to_bank_questions
 
 
 ROOT = Path(__file__).resolve().parents[1]
-QUESTION_BANK = ROOT / "question_bank_72.xlsx"
+QUESTION_BANK = ROOT / "input" / "question_bank_72.xlsx"
 QUESTION_PAPERS = ROOT / "output" / "question_papers.xlsx"
 RESPONSES = ROOT / "output" / "student_responses.xlsx"
 

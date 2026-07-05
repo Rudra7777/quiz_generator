@@ -7,10 +7,10 @@ Dynamic quiz generation system that:
 - Generates individual question papers for each student
 
 Usage:
-    python main.py --input question_bank.xlsx --students 50 --hard 4 --medium 6 --easy 5
+    python main.py --input input/question_bank.xlsx --students 50 --hard 4 --medium 6 --easy 5
 
 Or with defaults:
-    python main.py --input question_bank.xlsx --students 50
+    python main.py --input input/question_bank.xlsx --students 50
 """
 
 import os
@@ -52,7 +52,7 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:
-  python main.py --input question_bank.xlsx --students 50
+  python main.py --input input/question_bank.xlsx --students 50
   python main.py --input questions.xlsx --students 30 --hard 5 --medium 8 --easy 7
   python main.py --create-sample  # Creates a sample question bank
         '''
