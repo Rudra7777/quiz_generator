@@ -1,22 +1,46 @@
 """
 Response Generator Module
 
-Generates a dummy student response sheet (Excel) simulating Google Form output.
-Each student answers only the questions from their assigned set.
-All assigned questions are treated as compulsory (no blank responses).
+Owns the shape of the student response sheet — the Google Forms export that Part 2
+scores — and generates dummy sheets in that exact shape for rehearsing the pipeline.
+
+Each student answers only the questions from their assigned set, so an answer column
+is blank unless that question number was on that student's paper. All assigned
+questions are treated as compulsory (no blank responses).
 """
 
 import random
+import re
+from datetime import datetime, timedelta
+
 import pandas as pd
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 
-from excel_handler import load_question_bank, FullQuestionBank
+from excel_handler import load_question_bank, set_label, parse_set_label, SET_LABEL_RE, FullQuestionBank
+
+
+# ── Response sheet column vocabulary ──────────────────────────────────────────
+# These are the headers Google Forms produces. answer_checker parses them back.
+TIMESTAMP_COL = "Timestamp"
+EMAIL_COL = "Email address"
+NAME_COL = "Full Name"
+ROLL_COL = "Roll Number"
+SET_COL = "Question Set"
+IDENTITY_COLS = [TIMESTAMP_COL, EMAIL_COL, NAME_COL, ROLL_COL, SET_COL]
+
+# Matches "Q - 01 [Answer]" as exported, plus the shorter forms people hand-edit to.
+ANSWER_COL_RE = re.compile(r"^Q\s*-?\s*0*(\d+)\s*(?:\[Answer\])?$", re.IGNORECASE)
+
+
+def answer_column(question_no: int) -> str:
+    """Google Forms header for a question's answer column."""
+    return f"Q - {question_no:02d} [Answer]"
 
 
 def _read_set_sheet(question_papers_path: str, sheet_name: str) -> pd.DataFrame:
     """
-    Read a Set_N sheet robustly across formats.
+    Read a set sheet robustly across formats.
 
     Supports both:
     - plain sheets where header is on first row
@@ -53,7 +77,7 @@ def extract_set_questions(question_papers_path: str) -> Dict[str, List[Tuple[int
     - Which set each student has
     - What the correct answer is for each positional question
 
-    Then reads each Set_N sheet to get the actual question numbers
+    Then reads each set sheet to get the actual question numbers
     (from Q.No column mapping to original question_no via question text matching).
 
     Returns:
@@ -64,7 +88,7 @@ def extract_set_questions(question_papers_path: str) -> Dict[str, List[Tuple[int
 
     # Read each Set sheet to get the original question numbers
     xl = pd.ExcelFile(question_papers_path)
-    set_sheets = [s for s in xl.sheet_names if s.startswith('Set_')]
+    set_sheets = [s for s in xl.sheet_names if SET_LABEL_RE.match(s)]
 
     set_questions = {}
 
@@ -105,7 +129,7 @@ def map_paper_to_bank_questions(
         Dict mapping set_name -> list of original question_no values
     """
     xl = pd.ExcelFile(question_papers_path)
-    set_sheets = [s for s in xl.sheet_names if s.startswith('Set_')]
+    set_sheets = [s for s in xl.sheet_names if SET_LABEL_RE.match(s)]
 
     # Build lookup: question_text -> question_no
     text_to_no = {}
@@ -155,8 +179,8 @@ def generate_responses(
         seed: Random seed for reproducibility
 
     Returns:
-        DataFrame with columns: Set_No, Q1, Q2, ..., QT
-        where T = total questions in the bank
+        DataFrame in Google Forms export shape: Timestamp, Email address, Full Name,
+        Roll Number, Question Set, then one "Q - NN [Answer]" column per bank question.
     """
     rng = random.Random(seed) if seed is not None else random.Random()
 
@@ -167,8 +191,7 @@ def generate_responses(
     )
 
     # Get available set names
-    set_names = sorted(set_to_question_nos.keys(),
-                       key=lambda s: int(s.split('_')[1]))
+    set_names = sorted(set_to_question_nos.keys(), key=parse_set_label)
 
     if num_students > len(set_names):
         raise ValueError(
@@ -185,32 +208,39 @@ def generate_responses(
     all_options = ['A', 'B', 'C', 'D']
 
     # --- Generate responses ---
+    # Submissions trickle in over the quiz window, as a real Form's would.
+    submitted_at = datetime(2026, 2, 16, 16, 0, 0)
+
     rows = []
     for student_idx in range(num_students):
         set_name = set_names[student_idx]
         assigned_qnos = set_to_question_nos[set_name]
+        student_no = student_idx + 1
 
-        # Initialize all question columns as blank (NaN)
-        row = {'Set_No': set_name}
+        submitted_at += timedelta(seconds=rng.randint(20, 180))
+
+        row = {
+            TIMESTAMP_COL: submitted_at,
+            EMAIL_COL: f"student{student_no:02d}@example.com",
+            NAME_COL: f"Student {student_no:02d}",
+            ROLL_COL: f"R{student_no:03d}",
+            SET_COL: set_name,
+        }
+        # Every bank question gets a column; only assigned ones get filled.
         for q_no in range(1, total_questions + 1):
-            row[f'Q{q_no}'] = None  # blank by default
+            row[answer_column(q_no)] = None
 
-        # Fill in answers only for assigned questions
         for q_no in assigned_qnos:
             correct_answer = qno_to_answer[q_no]
             roll = rng.random()
 
             if roll < correct_rate:
-                # Correct answer
-                row[f'Q{q_no}'] = correct_answer
-            elif roll < correct_rate + wrong_rate:
-                # Wrong answer: pick a random wrong option
-                wrong_options = [o for o in all_options if o != correct_answer]
-                row[f'Q{q_no}'] = rng.choice(wrong_options)
+                row[answer_column(q_no)] = correct_answer
             else:
-                # Compulsory response: remaining probability also maps to wrong.
+                # Assigned questions are compulsory, so the remaining probability
+                # (wrong_rate and anything left over) all maps to a wrong option.
                 wrong_options = [o for o in all_options if o != correct_answer]
-                row[f'Q{q_no}'] = rng.choice(wrong_options)
+                row[answer_column(q_no)] = rng.choice(wrong_options)
 
         rows.append(row)
 

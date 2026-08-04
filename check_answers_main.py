@@ -23,7 +23,7 @@ import argparse
 from pathlib import Path
 
 from excel_handler import load_question_bank
-from response_generator import generate_responses, save_response_sheet
+from response_generator import generate_responses, save_response_sheet, IDENTITY_COLS
 from answer_checker import (
     load_response_sheet,
     check_all_responses,
@@ -146,10 +146,10 @@ def run_generate(args):
     print(f"  ✓ Saved: {output_path}")
 
     # Summary
-    num_cols = len(response_df.columns) - 1  # exclude Set_No
+    num_cols = len(response_df.columns) - len(IDENTITY_COLS)
     print(f"\n{'=' * 70}")
     print(f"✅ Generated {len(response_df)} student responses")
-    print(f"   Columns: Set_No + {num_cols} question columns = {num_cols + 1} total")
+    print(f"   Columns: {len(IDENTITY_COLS)} identity + {num_cols} question columns")
     print(f"   File: {output_path}")
     print(f"{'=' * 70}")
 
@@ -217,7 +217,6 @@ def run_check(args):
     output_path = generate_scoring_report(
         report,
         args.output,
-        response_df=response_df,
         question_papers_path=args.question_papers,
         question_bank=question_bank,
     )
@@ -225,7 +224,7 @@ def run_check(args):
 
     print(f"\n{'=' * 70}")
     print(f"✅ Scoring complete! Report: {output_path}")
-    print(f"   Sheets: Scores, Summary, Validation, Responses_Review")
+    print(f"   Sheets: Scores, Summary, Validation, Faculty_Report, Responses_Review")
     print(f"{'=' * 70}")
 
     return True

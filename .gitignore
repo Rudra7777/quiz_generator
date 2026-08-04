@@ -30,6 +30,14 @@ wheels/
 # Temp files
 temp_upload.xlsx
 *.tmp
+tmp/
+.playwright-mcp/
+
+# Generated outputs. The two fixtures the test suite reads are kept, so that a
+# fresh checkout (and CI) can run pytest without generating papers first.
+output/*
+!output/question_papers.xlsx
+!output/student_responses.xlsx
 
 # IDE
 .vscode/

@@ -12,7 +12,7 @@ A web-based quiz allocation system that generates randomized question papers wit
 
 ## Live Demo
 
-🚀 [View App on Streamlit Cloud](#) *(Add your URL after deployment)*
+🚀 [View App on Reflex Cloud](https://quiz-web-silver-moon.reflex.run)
 
 ## Local Setup
 
@@ -33,6 +33,17 @@ reflex run
 ```bash
 streamlit run app.py
 ```
+
+## Deployment
+
+The Reflex UI is deployed to [Reflex Cloud](https://build.reflex.dev), which hosts both the frontend and backend for you (no Vercel/servers needed).
+
+```bash
+reflex login    # one-time, opens a browser to authenticate
+reflex deploy --app-name quiz-web --project 67b7e9f1-6dba-4838-9eec-129ecd156331
+```
+
+This rebuilds the app and pushes it to the same live URL above. Currently on the Free tier (1 CPU / 1GB RAM, up to 5 deployments).
 
 ## Automated Testing
 
@@ -62,11 +73,50 @@ Your Excel file should have these columns:
 ## Output
 
 The generated Excel contains:
-- **Set_1 to Set_N**: Individual question papers (no answers)
+- **S-01 to S-NN**: Individual question papers (no answers)
 - **Answer_Key**: Correct answers for teachers
 - **Allocation_Table**: Original allocation by difficulty
 - **Shuffled_Table**: Randomized order per student
 - **Evaluation**: Usage statistics and metrics
+
+Set labels are `S-01`, `S-02`, … everywhere — question paper sheets, the answer key, and
+the Google Form's "Question Set" dropdown all use the same string, so responses join
+straight back to the right answer key. See `docs/adr/0001`.
+
+## Student Response Format
+
+Part 2 scores the Google Forms export directly. It needs these columns:
+
+| Column | Purpose |
+| --- | --- |
+| `Timestamp` | Picks the winner when a student submits twice |
+| `Email address` | Carried through to the reports |
+| `Full Name` | Carried through to the reports |
+| `Roll Number` | Student identity; duplicate submissions are deduplicated on it |
+| `Question Set` | Joins the row to its answer key (`S-01` style) |
+| `Q - 01 [Answer]` … | One column per **question bank number**, blank unless that question was on the student's paper |
+
+Answer cells hold a bare `A`/`B`/`C`/`D`. Answer column headers are read tolerantly —
+`Q - 01 [Answer]`, `Q-01`, `Q01` and `Q1` all mean question 1.
+
+If a Roll Number submits more than once, only the latest submission is scored; the
+dropped ones are listed on the `Validation` sheet.
+
+## Scoring Report
+
+`scoring_report.xlsx` contains:
+- **Scores**: per student — Roll Number, Name, Email, Set, Assigned, Attempted, Correct, Wrong
+- **Summary**: cohort averages, pass rate, and mark distribution in columns A–B, plus a live
+  Excel chart — a mark-by-mark histogram with a fitted normal curve over it. Chart source
+  data sits in columns D–F.
+- **Validation**: duplicate submissions, and anyone who answered outside their set
+- **Faculty_Report**: the layout the faculty asked for — answer key strip on rows 1–2, then
+  one row per student with live `Count` and `AnsC` formulas (see `docs/adr/0002`).
+  Answers are colour-coded against the key: **blue** correct, ***red italic*** wrong,
+  **purple** answered but not on that student's paper (see `docs/adr/0003`). Conditional
+  formatting, so fixing a key letter in row 2 recolours the sheet and recomputes the marks
+  together. Hidden helper columns to the right of the answers drive both — don't delete them.
+- **Responses_Review**: every answer cell colour-coded green/red
 
 ## Sample Files
 

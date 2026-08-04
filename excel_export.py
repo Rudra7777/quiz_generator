@@ -17,7 +17,7 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 
-from excel_handler import load_question_bank, FullQuestionBank
+from excel_handler import load_question_bank, set_label, FullQuestionBank
 
 
 def qid_to_number(question_id: str, question_bank: FullQuestionBank) -> int:
@@ -63,11 +63,11 @@ def create_formatted_excel(
     # Question Paper Sheets (one per student)
     # ══════════════════════════════════════════════════════════════════════
     for student_idx, quiz in enumerate(shuffled_matrix):
-        ws = wb.create_sheet(title=f"Set_{student_idx + 1}")
+        ws = wb.create_sheet(title=set_label(student_idx + 1))
 
         # Title
         ws.merge_cells('A1:F1')
-        ws['A1'] = f"Question Paper - Set {student_idx + 1}"
+        ws['A1'] = f"Question Paper - Set {set_label(student_idx + 1)}"
         ws['A1'].font = header_font
         ws['A1'].alignment = center_align
 
@@ -119,7 +119,7 @@ def create_formatted_excel(
 
         for student_idx, quiz in enumerate(shuffled_matrix):
             row = student_idx + 4
-            ws.cell(row=row, column=1, value=f"Set_{student_idx + 1}").border = thin_border
+            ws.cell(row=row, column=1, value=set_label(student_idx + 1)).border = thin_border
             for q_idx, qid in enumerate(quiz):
                 q = question_bank.get_by_id(qid)
                 ws.cell(row=row, column=q_idx + 2, value=q.answer).border = thin_border
@@ -139,7 +139,7 @@ def create_formatted_excel(
     cell.fill = header_fill
     cell.border = thin_border
     for s_idx in range(num_students):
-        cell = ws.cell(row=3, column=s_idx + 2, value=f"S{s_idx + 1}")
+        cell = ws.cell(row=3, column=s_idx + 2, value=set_label(s_idx + 1))
         cell.font = header_font_white
         cell.fill = header_fill
         cell.border = thin_border
@@ -172,7 +172,7 @@ def create_formatted_excel(
     cell.fill = green_fill
     cell.border = thin_border
     for s_idx in range(num_students):
-        cell = ws.cell(row=3, column=s_idx + 2, value=f"S{s_idx + 1}")
+        cell = ws.cell(row=3, column=s_idx + 2, value=set_label(s_idx + 1))
         cell.font = header_font_white
         cell.fill = green_fill
         cell.border = thin_border

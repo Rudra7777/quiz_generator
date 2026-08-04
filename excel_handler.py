@@ -6,10 +6,28 @@ Provides functions for:
 - Generating question papers as multi-sheet Excel
 """
 
+import re
+
 import pandas as pd
 from dataclasses import dataclass
 from typing import List, Dict, Optional
 from pathlib import Path
+
+
+SET_LABEL_RE = re.compile(r"^S-(\d+)$")
+
+
+def set_label(set_number: int) -> str:
+    """Canonical label for a set (1 -> 'S-01'). See docs/adr/0001."""
+    return f"S-{set_number:02d}"
+
+
+def parse_set_label(label: str) -> int:
+    """Parse a set label back to its number. Raises ValueError if malformed."""
+    match = SET_LABEL_RE.match(str(label).strip())
+    if match is None:
+        raise ValueError(f"Not a set label: {label!r}. Expected 'S-01' style.")
+    return int(match.group(1))
 
 
 @dataclass
@@ -147,7 +165,7 @@ def generate_question_papers(
     """
     Generate question papers as multi-sheet Excel file.
     
-    Each student gets a separate sheet named "Set_1", "Set_2", etc.
+    Each student gets a separate sheet named "S-01", "S-02", etc.
     Questions are shown WITHOUT the answer column.
     
     Args:
@@ -165,7 +183,7 @@ def generate_question_papers(
     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
         # Generate sheet for each student
         for student_idx, quiz in enumerate(allocation_matrix):
-            sheet_name = f"Set_{student_idx + 1}"
+            sheet_name = set_label(student_idx + 1)
             
             rows = []
             for q_idx, question_id in enumerate(quiz):
@@ -190,7 +208,7 @@ def generate_question_papers(
             answer_rows = []
             for student_idx, quiz in enumerate(allocation_matrix):
                 student_answers = {}
-                student_answers['Set'] = f"Set_{student_idx + 1}"
+                student_answers['Set'] = set_label(student_idx + 1)
                 for q_idx, question_id in enumerate(quiz):
                     q = question_bank.get_by_id(question_id)
                     student_answers[f'Q{q_idx + 1}'] = q.answer

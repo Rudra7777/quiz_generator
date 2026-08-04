@@ -9,14 +9,16 @@ All heavy lifting is delegated to the existing engine modules; raw file bytes ar
 held in backend-only vars (leading underscore) so they are never shipped to the client.
 """
 
+import io
 import os
 import secrets
 import tempfile
 
 import reflex as rx
+from openpyxl import load_workbook
 
 from allocator import QuizStructure, allocate_quizzes, shuffle_all_quizzes
-from excel_handler import load_question_bank
+from excel_handler import load_question_bank, SET_LABEL_RE
 from response_generator import generate_responses
 from answer_checker import (
     load_response_sheet,
@@ -54,6 +56,7 @@ class GenerateState(rx.State):
 
     # Uploaded bank
     bank_uploaded: bool = False
+    bank_filename: str = ""
     hard_avail: int = 0
     medium_avail: int = 0
     easy_avail: int = 0
@@ -194,6 +197,7 @@ class GenerateState(rx.State):
             self.easy_avail = counts.get("easy", 0)
             self._bank_bytes = data
             self.bank_uploaded = True
+            self.bank_filename = files[0].filename or ""
             # Seed sensible defaults from what's available.
             self.hard_count = min(4, self.hard_avail)
             self.medium_count = min(6, self.medium_avail)
@@ -201,6 +205,7 @@ class GenerateState(rx.State):
             self.status = f"Loaded {self.total_avail} questions."
         except Exception as exc:  # noqa: BLE001 - surface any load error to the user
             self.bank_uploaded = False
+            self.bank_filename = ""
             self.error = f"Could not load file: {exc}"
         finally:
             if os.path.exists(path):
@@ -264,10 +269,10 @@ class EvaluateState(rx.State):
     _generated_responses_bytes: bytes = b""
     _chk_papers_bytes: bytes = b""
     _chk_responses_bytes: bytes = b""
-    _report_bytes: bytes = b""
 
     # Generate dummy responses
     gen_papers_uploaded: bool = False
+    gen_papers_filename: str = ""
     gen_students: int = 70
     correct_rate: int = 70
     wrong_rate: int = 20
@@ -279,7 +284,9 @@ class EvaluateState(rx.State):
 
     # Check & score
     chk_papers_uploaded: bool = False
+    chk_papers_filename: str = ""
     chk_responses_uploaded: bool = False
+    chk_responses_filename: str = ""
     pass_threshold: int = 6
     score_status: str = ""
     score_error: str = ""
@@ -332,8 +339,21 @@ class EvaluateState(rx.State):
         self.responses_ready = False
         if not files:
             return
-        self._gen_papers_bytes = await files[0].read()
+        data = await files[0].read()
+        self._gen_papers_bytes = data
         self.gen_papers_uploaded = True
+        self.gen_papers_filename = files[0].filename or ""
+
+        # Auto-fill student count from the number of set sheets in the file.
+        try:
+            wb = load_workbook(io.BytesIO(data), read_only=True)
+            set_count = sum(1 for name in wb.sheetnames if SET_LABEL_RE.match(name))
+            wb.close()
+            if set_count:
+                self.gen_students = set_count
+        except Exception:  # noqa: BLE001 - keep existing student count if unreadable
+            pass
+
         self.gen_status = "Question papers loaded."
 
     @rx.event
@@ -343,6 +363,7 @@ class EvaluateState(rx.State):
             return
         self._chk_papers_bytes = await files[0].read()
         self.chk_papers_uploaded = True
+        self.chk_papers_filename = files[0].filename or ""
 
     @rx.event
     async def handle_chk_responses_upload(self, files: list[rx.UploadFile]):
@@ -351,6 +372,7 @@ class EvaluateState(rx.State):
             return
         self._chk_responses_bytes = await files[0].read()
         self.chk_responses_uploaded = True
+        self.chk_responses_filename = files[0].filename or ""
 
     # ── Actions ───────────────────────────────────────────────────────────
     @rx.event
@@ -376,11 +398,13 @@ class EvaluateState(rx.State):
                 blank_rate=0.0,
                 seed=self.gen_seed if self.gen_use_seed else None,
             )
-            self._generated_responses_bytes = _make_excel_bytes_from_dataframe(
-                response_df, "Responses"
-            )
+            responses_bytes = _make_excel_bytes_from_dataframe(response_df, "Responses")
+            self._generated_responses_bytes = responses_bytes
             self.responses_ready = True
             self.gen_status = f"Generated dummy responses for {len(response_df)} students."
+            # Deliver in this same event so the exact generated data doesn't depend
+            # on the session store keeping the blob across events.
+            return rx.download(data=responses_bytes, filename="student_responses.xlsx")
         except Exception as exc:  # noqa: BLE001
             self.gen_error = f"Could not generate responses: {exc}"
         finally:
@@ -393,6 +417,39 @@ class EvaluateState(rx.State):
             data=self._generated_responses_bytes, filename="student_responses.xlsx"
         )
 
+    def _build_scoring_report(self):
+        """Score the uploaded responses and return (report, report_bytes).
+
+        Pure computation from the two uploaded blobs — no state writes. Scoring is
+        deterministic, so this can be re-run on a later download click and produce
+        the identical file. Keeping the report out of persisted state avoids relying
+        on Reflex Cloud's Redis session store holding a large blob across events
+        (under memory pressure it may evict it, yielding a 0-byte download).
+        """
+        qp_path = _write_temp(self._chk_papers_bytes)
+        resp_path = _write_temp(self._chk_responses_bytes)
+        try:
+            bank = _load_question_bank_from_question_papers(qp_path)
+            response_df = load_response_sheet(resp_path)
+            report = check_all_responses(
+                response_df=response_df,
+                question_papers_path=qp_path,
+                question_bank=bank,
+                pass_threshold=float(self.pass_threshold),
+            )
+            report_buffer = io.BytesIO()
+            generate_scoring_report(
+                report,
+                report_buffer,
+                question_papers_path=qp_path,
+                question_bank=bank,
+            )
+            return report, report_buffer.getvalue()
+        finally:
+            for p in (qp_path, resp_path):
+                if p and os.path.exists(p):
+                    os.remove(p)
+
     @rx.event
     def check_score_action(self):
         self.score_status = ""
@@ -404,32 +461,8 @@ class EvaluateState(rx.State):
         if not self.chk_responses_uploaded:
             self.score_error = "Upload the student responses file."
             return
-        qp_path = _write_temp(self._chk_papers_bytes)
-        resp_path = _write_temp(self._chk_responses_bytes)
-        report_path = None
         try:
-            bank = _load_question_bank_from_question_papers(qp_path)
-            response_df = load_response_sheet(resp_path)
-            report = check_all_responses(
-                response_df=response_df,
-                question_papers_path=qp_path,
-                question_bank=bank,
-                pass_threshold=float(self.pass_threshold),
-            )
-            with tempfile.NamedTemporaryFile(
-                delete=False, suffix=".xlsx", prefix="quiz_web_report_"
-            ) as tmp:
-                report_path = tmp.name
-            generate_scoring_report(
-                report,
-                report_path,
-                response_df=response_df,
-                question_papers_path=qp_path,
-                question_bank=bank,
-            )
-            with open(report_path, "rb") as fh:
-                self._report_bytes = fh.read()
-
+            report, report_bytes = self._build_scoring_report()
             self.avg_score = report.avg_score
             self.median_score = report.median_score
             self.pass_rate = report.pass_rate
@@ -440,13 +473,16 @@ class EvaluateState(rx.State):
             self.total_students = len(report.student_reports)
             self.report_ready = True
             self.score_status = "Scoring completed."
+            # Deliver the file in this same event so the bytes never have to survive
+            # a round-trip through the session store.
+            return rx.download(data=report_bytes, filename="scoring_report.xlsx")
         except Exception as exc:  # noqa: BLE001
             self.score_error = f"Scoring failed: {exc}"
-        finally:
-            for p in (qp_path, resp_path, report_path):
-                if p and os.path.exists(p):
-                    os.remove(p)
 
     @rx.event
     def download_report(self):
-        return rx.download(data=self._report_bytes, filename="scoring_report.xlsx")
+        try:
+            _, report_bytes = self._build_scoring_report()
+            return rx.download(data=report_bytes, filename="scoring_report.xlsx")
+        except Exception as exc:  # noqa: BLE001
+            self.score_error = f"Scoring failed: {exc}"

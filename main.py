@@ -27,6 +27,7 @@ from excel_handler import (
     load_question_bank,
     generate_question_papers,
     create_sample_question_bank_excel,
+    set_label,
     FullQuestionBank,
 )
 from metrics import (
@@ -312,7 +313,7 @@ def main():
     print(f"  - {args.output}/shuffled_table.csv    (Shuffled allocation)")
     print(f"  - {args.output}/evaluation.csv        (Metrics summary)")
     
-    print(f"\n📊 The question_papers.xlsx contains {args.students} sheets (Set_1 to Set_{args.students})")
+    print(f"\n📊 The question_papers.xlsx contains {args.students} sheets (S-01 to {set_label(args.students)})")
     print("   Each sheet has questions WITHOUT answers for students.")
     print("   The 'Answer_Key' sheet contains all answers for teachers.")
     

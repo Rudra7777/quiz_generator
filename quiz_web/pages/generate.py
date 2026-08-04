@@ -17,6 +17,8 @@ def _upload_step() -> rx.Component:
                 "bank_upload",
                 GenerateState.handle_bank_upload(rx.upload_files(upload_id="bank_upload")),
                 "Question bank",
+                uploaded=GenerateState.bank_uploaded,
+                filename=GenerateState.bank_filename,
             ),
             feedback(GenerateState.error, "red", "triangle_alert"),
             rx.cond(

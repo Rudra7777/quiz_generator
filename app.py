@@ -257,7 +257,7 @@ def _render_generation_tab():
                     st.caption(f"Seed used: {run_seed} (auto-generated for this run)")
 
                 st.caption(
-                    "Sheets: Set_1 … Set_N, Answer_Key, Allocation_Table, Shuffled_Table, Evaluation, Question_Bank"
+                    "Sheets: S-01 … S-NN, Answer_Key, Allocation_Table, Shuffled_Table, Evaluation, Question_Bank"
                 )
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
@@ -396,7 +396,6 @@ def _render_answer_checking_tab():
                 generate_scoring_report(
                     report,
                     report_temp_path,
-                    response_df=response_df,
                     question_papers_path=qp_path,
                     question_bank=question_bank,
                 )

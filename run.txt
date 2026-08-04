@@ -8,6 +8,13 @@ Input files live in the `input/` folder:
 A question bank Excel must have these columns:
   question_no, question, option_a, option_b, option_c, option_d, answer (A/B/C/D), difficulty (H/M/L)
 
+Question paper sets are labelled S-01, S-02, ... Use those exact strings for the
+"Question Set" dropdown in the Google Form so responses join back to the answer key.
+
+The student responses file is the Google Forms export, with columns:
+  Timestamp, Email address, Full Name, Roll Number, Question Set,
+  Q - 01 [Answer], Q - 02 [Answer], ...   (one per question bank number)
+
 
 1. SETUP (do this once)
 -----------------------
@@ -20,7 +27,9 @@ A question bank Excel must have these columns:
 
   Then open http://localhost:3000
   - "Generate Papers" page: upload a bank from input/, configure, download question_papers.xlsx
-  - "Evaluate Answers" page: generate dummy responses, then check & score, download scoring_report.xlsx
+  - "Evaluate Answers" page: generate dummy responses (a stand-in for a real Google
+    Forms download), then check & score, download scoring_report.xlsx
+    Sheets: Scores, Summary, Validation, Faculty_Report, Responses_Review
 
 
 3. WEB APP — STREAMLIT UI (original)
@@ -54,3 +63,14 @@ A question bank Excel must have these columns:
 5. TESTS
 --------
   pytest -q
+
+
+6. DEPLOYMENT (REFLEX CLOUD)
+-----------------------------
+  Live app: https://quiz-web-silver-moon.reflex.run
+
+  To push updates:
+    reflex login    (one-time, opens a browser to authenticate)
+    reflex deploy --app-name quiz-web --project 67b7e9f1-6dba-4838-9eec-129ecd156331
+
+  Free tier: 1 CPU / 1GB RAM, up to 5 deployments.
