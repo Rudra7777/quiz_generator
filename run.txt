@@ -73,4 +73,10 @@ The student responses file is the Google Forms export, with columns:
     reflex login    (one-time, opens a browser to authenticate)
     reflex deploy --app-name quiz-web --project 67b7e9f1-6dba-4838-9eec-129ecd156331
 
+  If `reflex deploy` prints only warnings and exits without deploying, the
+  hosting CLI is out of date — it fails silently rather than reporting an error,
+  so the cloud keeps serving the previous build. Fix:
+    pip install --upgrade reflex-hosting-cli
+  Check it worked with `reflex cloud project list`, which should print a table.
+
   Free tier: 1 CPU / 1GB RAM, up to 5 deployments.
