@@ -59,17 +59,21 @@ def _attach_bank_no(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _read_set_sheet(question_papers_path: str, sheet_name: str) -> pd.DataFrame:
+def _read_set_sheet(source, sheet_name: str) -> pd.DataFrame:
     """
     Read a set sheet robustly across formats.
 
     Supports both:
     - plain sheets where header is on first row
     - styled sheets where title row exists and header appears later
+
+    `source` is a path or an already-open pd.ExcelFile. Prefer the latter: every
+    attempt here re-parses whatever it is handed, and a papers workbook holds one
+    sheet per student, so re-opening the path costs the whole file each time.
     """
     for header_row in (0, 1, 2, 3, 4, 5):
         try:
-            df = pd.read_excel(question_papers_path, sheet_name=sheet_name, header=header_row)
+            df = pd.read_excel(source, sheet_name=sheet_name, header=header_row)
         except Exception:
             continue
 
@@ -115,7 +119,7 @@ def extract_set_questions(question_papers_path: str) -> Dict[str, List[Tuple[int
 
     for sheet_name in set_sheets:
         # Read the question paper sheet
-        paper_df = _read_set_sheet(question_papers_path, sheet_name)
+        paper_df = _read_set_sheet(xl, sheet_name)
 
         # Get answer row for this set from answer key
         set_row = answer_key_df[answer_key_df['Set'] == sheet_name]
@@ -161,7 +165,7 @@ def map_paper_to_bank_questions(
     set_to_question_nos = {}
 
     for sheet_name in set_sheets:
-        paper_df = _read_set_sheet(question_papers_path, sheet_name)
+        paper_df = _read_set_sheet(xl, sheet_name)
 
         if BANK_NO_COL in paper_df.columns:
             set_to_question_nos[sheet_name] = paper_df[BANK_NO_COL].tolist()
