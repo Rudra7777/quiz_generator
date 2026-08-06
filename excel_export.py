@@ -26,6 +26,11 @@ def qid_to_number(question_id: str, question_bank: FullQuestionBank) -> int:
     return q.question_no if q else 0
 
 
+def question_code(question_no: int) -> str:
+    """Printed form of a Question Number, e.g. 27 -> 'Q- 27'."""
+    return f"Q- {question_no:02d}"
+
+
 def create_formatted_excel(
     allocation_matrix: list,
     shuffled_matrix: list,
@@ -44,7 +49,6 @@ def create_formatted_excel(
     wb = Workbook()
 
     # ── Shared styles ─────────────────────────────────────────────────────
-    header_font = Font(bold=True, size=14)
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     header_font_white = Font(bold=True, size=11, color="FFFFFF")
     green_fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
@@ -55,6 +59,11 @@ def create_formatted_excel(
     )
     wrap_align = Alignment(wrap_text=True, vertical='top')
     center_align = Alignment(horizontal='center', vertical='center')
+    left_align = Alignment(horizontal='left', vertical='center')
+    bold_font = Font(bold=True)
+    qset_font = Font(bold=True, color="FF0000")
+    qset_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+    qcd_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
 
     # Remove default sheet
     wb.remove(wb.active)
@@ -63,42 +72,56 @@ def create_formatted_excel(
     # Question Paper Sheets (one per student)
     # ══════════════════════════════════════════════════════════════════════
     for student_idx, quiz in enumerate(shuffled_matrix):
-        ws = wb.create_sheet(title=set_label(student_idx + 1))
+        label = set_label(student_idx + 1)
+        ws = wb.create_sheet(title=label)
 
-        # Title
-        ws.merge_cells('A1:F1')
-        ws['A1'] = f"Question Paper - Set {set_label(student_idx + 1)}"
-        ws['A1'].font = header_font
-        ws['A1'].alignment = center_align
-
-        # Headers
-        for col, header in enumerate(['Q.No', 'Question', 'Option A', 'Option B', 'Option C', 'Option D'], 1):
-            cell = ws.cell(row=3, column=col, value=header)
-            cell.font = header_font_white
-            cell.fill = header_fill
+        # Row 1: set label, then blank Name / Roll No fields to fill in by hand
+        for col in (1, 2, 3):
+            cell = ws.cell(row=1, column=col, value="QSet:" if col == 1 else label)
+            cell.font = qset_font
+            cell.fill = qset_fill
             cell.border = thin_border
             cell.alignment = center_align
+
+        ws.merge_cells(start_row=1, start_column=4, end_row=1, end_column=6)
+        ws.merge_cells(start_row=1, start_column=7, end_row=1, end_column=8)
+        ws.cell(row=1, column=4, value="Name:").font = bold_font
+        ws.cell(row=1, column=7, value="Roll No:").font = bold_font
+        for col in range(4, 9):
+            ws.cell(row=1, column=col).border = thin_border
+            ws.cell(row=1, column=col).alignment = left_align
+
+        # Row 2: headers. Two QCd columns — the bare Question Number and its
+        # printed 'Q- 27' form, which is what students copy into the form.
+        for col, header in enumerate(['Sr', 'QCd', 'QCd', 'Question', 'A', 'B', 'C', 'D'], 1):
+            cell = ws.cell(row=2, column=col, value=header)
+            cell.font = bold_font
+            cell.border = thin_border
+            cell.alignment = center_align
+        ws.cell(row=2, column=2).fill = qcd_fill
 
         # Questions
         for q_idx, question_id in enumerate(quiz):
             q = question_bank.get_by_id(question_id)
-            row = q_idx + 4
-            ws.cell(row=row, column=1, value=q_idx + 1).border = thin_border
-            ws.cell(row=row, column=1).alignment = center_align
-            ws.cell(row=row, column=2, value=q.question_text).border = thin_border
-            ws.cell(row=row, column=2).alignment = wrap_align
-            ws.cell(row=row, column=3, value=q.option_a).border = thin_border
-            ws.cell(row=row, column=4, value=q.option_b).border = thin_border
-            ws.cell(row=row, column=5, value=q.option_c).border = thin_border
-            ws.cell(row=row, column=6, value=q.option_d).border = thin_border
+            row = q_idx + 3
+            ws.cell(row=row, column=1, value=q_idx + 1)
+            ws.cell(row=row, column=2, value=q.question_no).fill = qcd_fill
+            ws.cell(row=row, column=3, value=question_code(q.question_no))
+            ws.cell(row=row, column=4, value=q.question_text)
+            options = (q.option_a, q.option_b, q.option_c, q.option_d)
+            for col, (letter, text) in enumerate(zip('ABCD', options), 5):
+                ws.cell(row=row, column=col, value=f"{letter}] {text}")
+
+            for col in range(1, 9):
+                cell = ws.cell(row=row, column=col)
+                cell.border = thin_border
+                cell.alignment = center_align if col <= 3 else wrap_align
 
         # Column widths & row heights
-        ws.column_dimensions['A'].width = 8
-        ws.column_dimensions['B'].width = 50
-        for ch in 'CDEF':
-            ws.column_dimensions[ch].width = 20
-        for r in range(4, len(quiz) + 4):
-            ws.row_dimensions[r].height = 30
+        for ch, width in zip('ABCDEFGH', (6, 8, 10, 55, 28, 28, 28, 28)):
+            ws.column_dimensions[ch].width = width
+        for r in range(3, len(quiz) + 3):
+            ws.row_dimensions[r].height = 45
 
     # ══════════════════════════════════════════════════════════════════════
     # Answer Key Sheet

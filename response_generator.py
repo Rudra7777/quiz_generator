@@ -32,10 +32,31 @@ IDENTITY_COLS = [TIMESTAMP_COL, EMAIL_COL, NAME_COL, ROLL_COL, SET_COL]
 # Matches "Q - 01 [Answer]" as exported, plus the shorter forms people hand-edit to.
 ANSWER_COL_RE = re.compile(r"^Q\s*-?\s*0*(\d+)\s*(?:\[Answer\])?$", re.IGNORECASE)
 
+# Column we expose on a parsed set sheet holding each row's Question Number.
+BANK_NO_COL = "BankNo"
+
 
 def answer_column(question_no: int) -> str:
     """Google Forms header for a question's answer column."""
     return f"Q - {question_no:02d} [Answer]"
+
+
+def _attach_bank_no(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add a BankNo column when the set sheet carries Question Numbers.
+
+    Papers written since the QCd change have two 'QCd' columns — the bare number and
+    its 'Q- 27' printed form — which pandas reads as 'QCd' and 'QCd.1'. Only one of
+    them parses as a number, and that is the one we want. Papers generated before the
+    change have neither; callers fall back to matching on question text.
+    """
+    for col in [c for c in df.columns if str(c).strip().lower().startswith("qcd")]:
+        numbers = pd.to_numeric(df[col], errors="coerce")
+        if numbers.notna().all():
+            out = df.copy()
+            out[BANK_NO_COL] = numbers.astype(int)
+            return out
+    return df
 
 
 def _read_set_sheet(question_papers_path: str, sheet_name: str) -> pd.DataFrame:
@@ -64,7 +85,7 @@ def _read_set_sheet(question_papers_path: str, sheet_name: str) -> pd.DataFrame:
         out = df.rename(columns={q_col: "Question"}).copy()
         out = out[out["Question"].notna()]
         if len(out) > 0:
-            return out
+            return _attach_bank_no(out)
 
     raise ValueError(f"Could not parse '{sheet_name}' with a valid Question column.")
 
@@ -122,8 +143,9 @@ def map_paper_to_bank_questions(
     """
     Map each set's positional questions to original question_no from the bank.
 
-    Reads each Set sheet, matches question text to the bank, and returns
-    the original question numbers.
+    Reads each Set sheet, taking the Question Number straight from its QCd column,
+    and falling back to matching question text for papers generated before QCd
+    was printed.
 
     Returns:
         Dict mapping set_name -> list of original question_no values
@@ -140,6 +162,11 @@ def map_paper_to_bank_questions(
 
     for sheet_name in set_sheets:
         paper_df = _read_set_sheet(question_papers_path, sheet_name)
+
+        if BANK_NO_COL in paper_df.columns:
+            set_to_question_nos[sheet_name] = paper_df[BANK_NO_COL].tolist()
+            continue
+
         question_nos = []
 
         for _, row in paper_df.iterrows():

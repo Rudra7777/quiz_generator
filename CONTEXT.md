@@ -13,8 +13,9 @@ _Avoid_: question pool, master list
 
 **Question Number**:
 A question's identity within the Question Bank (1..N). Stable across every sheet in the
-system — it is what an answer column refers to.
-_Avoid_: Q.No (that is the paper-local position), question id
+system — it is what an answer column refers to. Printed on a paper as `QCd`, in the
+zero-padded `Q- 07` form students copy into the Google Form.
+_Avoid_: Q.No, Sr (that is the paper-local position), question id
 
 **Set**:
 One student's randomized selection of questions from the Question Bank. Labelled
