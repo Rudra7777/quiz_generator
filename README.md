@@ -112,8 +112,11 @@ dropped ones are listed on the `Validation` sheet.
 - **Validation**: duplicate submissions, and anyone who answered outside their set
 - **Faculty_Report**: the layout the faculty asked for — answer key strip on rows 1–2, then
   one row per student with live `Count` and `AnsC` formulas (see `docs/adr/0002`).
-  Answers are colour-coded against the key: **blue** correct, ***red italic*** wrong,
-  **purple** answered but not on that student's paper (see `docs/adr/0003`). Conditional
+  Answers are colour-coded on two axes: the text says right or wrong against the key
+  (**blue** / ***red italic***), the background says whose question it was — light green
+  across the whole of the student's own set, answered or not, so the ones they skipped
+  show as empty green cells, and light yellow where they answered a question that was not
+  on their paper (see `docs/adr/0003`). Conditional
   formatting, so fixing a key letter in row 2 recolours the sheet and recomputes the marks
   together. Hidden helper columns to the right of the answers drive both — don't delete them.
 - **Responses_Review**: every answer cell colour-coded green/red

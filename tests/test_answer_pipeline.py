@@ -378,7 +378,7 @@ def test_faculty_report_layout(tmp_path: Path):
 
 
 def test_faculty_report_colour_codes_answers_against_the_key(tmp_path: Path):
-    """Blue where the answer matches the key row, red italic where it doesn't."""
+    """Text says right/wrong against the key; background says whose question it was."""
     question_bank = load_question_bank(str(QUESTION_BANK))
     response_df = _responses(4, seed=13)
 
@@ -405,19 +405,22 @@ def test_faculty_report_colour_codes_answers_against_the_key(tmp_path: Path):
 
     styles = {rule.formula[0]: rule.dxf for rule in ranges[0].rules}
 
-    correct = styles[f"AND({mask}4=1,H4=H$2)"].font
+    # Text colour is the answer's verdict, and says nothing about whose question
+    # it was — an out-of-set answer that matches the key still reads blue.
+    correct = styles['AND(H4<>"",H4=H$2)'].font
     assert correct.color.rgb == "FF0000FF" and correct.b and not correct.i
 
-    wrong = styles[f'AND({mask}4=1,H4<>"",H4<>H$2)'].font
+    wrong = styles['AND(H4<>"",H4<>H$2)'].font
     assert wrong.color.rgb == "FFFF0000" and wrong.b and wrong.i
 
-    # Out of set: purple, and it must NOT consult the key — being right earns nothing.
-    extra = styles[f'AND(H4<>"",{mask}4=0)']
-    assert extra.font.color.rgb == "FF7030A0"
-    assert extra.fill.bgColor.rgb == "FFE4D7F5"
+    # Background is allocation. Green covers the whole of a student's own set,
+    # answered or not, so the questions they skipped show as empty green cells.
+    assert styles[f"{mask}4=1"].fill.bgColor.rgb == "FFC6EFCE"
 
-    assert styles[f'AND({mask}4=1,H4<>"")'].fill.bgColor.rgb == "FFD9D9D9"
+    # Yellow only where they strayed outside their set — an unanswered question
+    # that was never theirs stays unfilled.
+    assert styles[f'AND({mask}4=0,H4<>"")'].fill.bgColor.rgb == "FFFFF2CC"
 
     # Correct/wrong rules key off row 2 — the answer key — so that editing a key
     # letter recolours the column.
-    assert "$2" in f"AND({mask}4=1,H4=H$2)"
+    assert all("$2" in f for f in styles if "H4=H$2" in f or "H4<>H$2" in f)

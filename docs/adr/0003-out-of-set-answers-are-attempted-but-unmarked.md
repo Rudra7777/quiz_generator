@@ -4,8 +4,8 @@ The Google Form shows every question in the bank, and the student's paper tells 
 subset to answer. Some answer questions that were not on their paper. Those answers count
 towards `Attempted` / `Count` — the student did the work — but earn nothing, right or
 wrong, because a student must not be able to gain marks by answering questions that were
-never assigned to them. They render in purple, distinct from blue (correct) and red
-(wrong), so "attempted but unmarked" is visible at a glance.
+never assigned to them. They render on a light yellow background, against the light green
+of the student's own set, so "attempted but unmarked" is visible at a glance.
 
 ## Consequences
 
@@ -21,8 +21,8 @@ So the Faculty_Report carries a **hidden helper block** to the right of the answ
 =SUMPRODUCT(--(H$2:CA$2=H4:CA4), CC4:EV4)
 ```
 
-and the conditional formatting reads the same block, which is what makes purple possible
-at all. Do not delete those columns because they look like clutter — `AnsC` silently
+and the conditional formatting reads the same block, which is what makes the green/yellow
+distinction possible at all. Do not delete those columns because they look like clutter — `AnsC` silently
 starts over-scoring if the second argument goes away.
 
 The block is what keeps `AnsC` both live (editing a key letter in row 2 still

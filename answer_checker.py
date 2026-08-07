@@ -407,15 +407,23 @@ def _color_code_answers(
     ws, first_letter: str, last_letter: str, last_row: int, mask_letter: str
 ) -> None:
     """
-    Colour every answer cell, in the faculty's own scheme:
+    Colour every answer cell, in the faculty's own scheme. Two independent
+    signals, so a cell says both things at once:
 
-        blue        matches the key, and the question was on this student's paper
-        red italic  on their paper, but they got it wrong
-        purple      NOT on their paper — counted as attempted, worth zero marks
+        text        blue if the answer matches the key, red italic if it does not
+        background  light green if the question was on this student's paper,
+                    light yellow if they answered one that was not
+
+    A question on their paper goes green whether they answered it or not, so the
+    ones they left blank stand out as empty green cells. A question that was not
+    on their paper stays unfilled unless they answered it.
 
     `mask_letter` is the first column of the hidden helper block, where 1 means
-    "this question was on this student's paper". Every rule consults it, so an
-    out-of-set answer can never render as correct however right it happens to be.
+    "this question was on this student's paper" — it is what the two background
+    rules read.
+
+    The font rules and the fill rules set disjoint properties, so Excel applies
+    one of each to the same cell without them competing.
 
     These are conditional formatting rules rather than fixed colours, so that
     correcting a key letter in row 2 recolours the sheet as well as recomputing
@@ -430,31 +438,24 @@ def _color_code_answers(
     key = f"{first_letter}$2"
     assigned = f"{mask_letter}4"
 
-    purple = "FF7030A0"
     rules = [
-        # Answered a question that was not on their paper. Checked first, and it
-        # deliberately ignores the key — being right earns nothing here.
+        # Text: right or wrong against the key, whether or not it was their question.
         (
-            f'AND({answer}<>"",{assigned}=0)',
-            DifferentialStyle(
-                font=Font(bold=True, color=purple),
-                fill=PatternFill(bgColor="FFE4D7F5"),
-            ),
-        ),
-        # Wrong: on their paper, answered, but not what the key says.
-        (
-            f'AND({assigned}=1,{answer}<>"",{answer}<>{key})',
-            DifferentialStyle(font=Font(bold=True, italic=True, color="FFFF0000")),
-        ),
-        # Correct: on their paper and matches the key.
-        (
-            f"AND({assigned}=1,{answer}={key})",
+            f'AND({answer}<>"",{answer}={key})',
             DifferentialStyle(font=Font(bold=True, color="FF0000FF")),
         ),
-        # Grey wash over whatever they answered from their own set.
         (
-            f'AND({assigned}=1,{answer}<>"")',
-            DifferentialStyle(fill=PatternFill(bgColor="FFD9D9D9")),
+            f'AND({answer}<>"",{answer}<>{key})',
+            DifferentialStyle(font=Font(bold=True, italic=True, color="FFFF0000")),
+        ),
+        # Background: was this question theirs?
+        (
+            f"{assigned}=1",
+            DifferentialStyle(fill=PatternFill(bgColor="FFC6EFCE")),
+        ),
+        (
+            f'AND({assigned}=0,{answer}<>"")',
+            DifferentialStyle(fill=PatternFill(bgColor="FFFFF2CC")),
         ),
     ]
 

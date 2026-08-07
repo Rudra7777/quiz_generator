@@ -56,5 +56,5 @@ _Avoid_: score, marks obtained, AnsC (that is the column label, not the concept)
 
 **Extra Answer**:
 An answer given to a question that was not in the student's Set. Counts towards Attempted,
-never towards Correct, and shown in purple so the distinction is visible.
+never towards Correct, and shown on a light yellow background so the distinction is visible.
 _Avoid_: invalid answer, out-of-set answer
