@@ -219,6 +219,10 @@ class GenerateState(rx.State):
         if not self.can_generate:
             self.error = "Fix the configuration before generating."
             return
+        if not self._bank_bytes:
+            self.bank_uploaded = False
+            self.error = "The uploaded question bank expired. Upload it again."
+            return
         path = _write_temp(self._bank_bytes)
         try:
             bank = load_question_bank(path)
@@ -250,6 +254,9 @@ class GenerateState(rx.State):
             self.last_seed = run_seed
             self.generated_count = self.num_students
             self.status = f"Generated {self.num_students} question papers."
+            # Deliver in this same event so the bytes never have to survive a round-trip
+            # through the session store — see the note on _build_scoring_report.
+            return rx.download(data=self._papers_bytes, filename="question_papers.xlsx")
         except Exception as exc:  # noqa: BLE001
             self.error = f"Generation failed: {exc}"
         finally:
@@ -258,6 +265,9 @@ class GenerateState(rx.State):
 
     @rx.event
     def download_papers(self):
+        if not self._papers_bytes:
+            self.error = "The generated papers expired. Generate them again."
+            return
         return rx.download(data=self._papers_bytes, filename="question_papers.xlsx")
 
 
@@ -413,6 +423,9 @@ class EvaluateState(rx.State):
 
     @rx.event
     def download_responses(self):
+        if not self._generated_responses_bytes:
+            self.gen_error = "The generated responses expired. Generate them again."
+            return
         return rx.download(
             data=self._generated_responses_bytes, filename="student_responses.xlsx"
         )

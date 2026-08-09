@@ -377,6 +377,44 @@ def test_faculty_report_layout(tmp_path: Path):
         assert sum(1 for k, v in zip(key, student) if k == v) == expected
 
 
+def test_faculty_report_count_and_ansc_carry_cached_results(tmp_path: Path):
+    """Count/AnsC must read correctly without a recalculation.
+
+    Excel on Windows opens a downloaded workbook in Protected View, which does not
+    recalculate; without a cached result the faculty sees two blank columns. The
+    formulas still have to be there — see docs/adr/0002.
+    """
+    question_bank = load_question_bank(str(QUESTION_BANK))
+    response_df = _responses(6, seed=21)
+
+    report = check_all_responses(
+        response_df=response_df,
+        question_papers_path=str(QUESTION_PAPERS),
+        question_bank=question_bank,
+    )
+
+    saved = generate_scoring_report(
+        report,
+        str(tmp_path / "report.xlsx"),
+        question_papers_path=str(QUESTION_PAPERS),
+        question_bank=question_bank,
+    )
+
+    # data_only=True reads the cached result, which is exactly what Protected View shows.
+    cached = load_workbook(saved, data_only=True)["Faculty_Report"]
+    scores = pd.read_excel(saved, sheet_name="Scores")
+
+    for offset, row in scores.iterrows():
+        excel_row = 4 + offset
+        assert cached.cell(excel_row, 6).value == row["Attempted"]
+        assert cached.cell(excel_row, 7).value == row["Correct"]
+
+    # The formulas survive the cached-value injection.
+    live = load_workbook(saved)["Faculty_Report"]
+    assert str(live["F4"].value).startswith("=COUNTA(")
+    assert str(live["G4"].value).startswith("=SUMPRODUCT(")
+
+
 def test_faculty_report_colour_codes_answers_against_the_key(tmp_path: Path):
     """Text says right/wrong against the key; background says whose question it was."""
     question_bank = load_question_bank(str(QUESTION_BANK))

@@ -10,9 +10,11 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
+import io
 import math
 import re
 import statistics
+import zipfile
 
 import pandas as pd
 from openpyxl.chart import BarChart, LineChart, Reference
@@ -470,7 +472,7 @@ def _write_faculty_report(
     response_df: pd.DataFrame,
     question_bank: FullQuestionBank,
     set_to_question_nos: Dict[str, List[int]],
-) -> None:
+) -> Dict[str, int]:
     """
     Write the 'Faculty_Report' sheet in the layout the faculty asked for:
 
@@ -488,6 +490,9 @@ def _write_faculty_report(
     so answering a question outside your set can never earn a mark, and the purple
     conditional format reads the same block. Without it a formula comparing the row
     to the key has no way to tell an assigned question from an extra one.
+
+    Returns the value each Count/AnsC formula evaluates to, keyed by cell reference, so
+    the caller can write them in as cached results — see `_inject_cached_values`.
     """
     ws = writer.book.create_sheet("Faculty_Report")
 
@@ -501,6 +506,8 @@ def _write_faculty_report(
     last_answer_col = first_answer_col + len(question_nos) - 1
     first_letter = get_column_letter(first_answer_col)
     last_letter = get_column_letter(last_answer_col)
+    count_letter = get_column_letter(len(IDENTITY_COLS) + 1)
+    ansc_letter = get_column_letter(len(IDENTITY_COLS) + 2)
 
     # Hidden helper block, one blank column clear of the answers.
     mask_first_col = last_answer_col + 2
@@ -530,6 +537,7 @@ def _write_faculty_report(
     )
 
     # Rows 4+: one per submission.
+    cached_values: Dict[str, int] = {}
     for offset, (_, row) in enumerate(response_df.iterrows()):
         excel_row = 4 + offset
         assigned_qnos = set(
@@ -561,15 +569,26 @@ def _write_faculty_report(
             ),
         )
 
+        count = 0
+        ansc = 0
         for q_offset, q_no in enumerate(question_nos):
             answer = _normalize_answer(row.get(f"Q{q_no}"))
             if answer is not None:
                 ws.cell(row=excel_row, column=first_answer_col + q_offset, value=answer)
+                count += 1
+                if q_no in assigned_qnos and answer == qno_to_answer[q_no]:
+                    ansc += 1
             ws.cell(
                 row=excel_row,
                 column=mask_first_col + q_offset,
                 value=1 if q_no in assigned_qnos else 0,
             )
+
+        # What Excel would compute on recalculation. Written in as cached results so
+        # the columns are readable in Protected View and in viewers that never
+        # recalculate; the formulas above still own the value once Excel recalcs.
+        cached_values[f"{count_letter}{excel_row}"] = count
+        cached_values[f"{ansc_letter}{excel_row}"] = ansc
 
     _color_code_answers(
         ws,
@@ -586,6 +605,89 @@ def _write_faculty_report(
     ws.column_dimensions["B"].width = 26
     ws.column_dimensions["C"].width = 20
     ws.freeze_panes = f"{first_letter}4"
+
+    return cached_values
+
+
+def _inject_cached_values(output_path, sheet_name: str, cached: Dict[str, int]) -> None:
+    """
+    Write cached results into formula cells of an already-saved .xlsx.
+
+    openpyxl emits formula cells as `<f>...</f><v></v>` — the formula with no computed
+    result. Excel fills them in on open because we set `fullCalcOnLoad`, but a workbook
+    downloaded from the internet opens in Protected View on Windows, which does *not*
+    recalculate: the faculty sees blank Count/AnsC columns and no colour coding. Other
+    viewers (Explorer/Outlook preview, WPS) never recalculate at all.
+
+    So we reopen the saved file and fill each `<v></v>` with the value we already
+    computed in Python. The formulas stay live — ADR 0002 requires editing the key row
+    to recalculate the column — this only gives them a result to show until then.
+
+    `output_path` may be a filesystem path or an in-memory buffer.
+    """
+    if not cached:
+        return
+
+    if isinstance(output_path, (str, Path)):
+        original = Path(output_path).read_bytes()
+    else:
+        output_path.seek(0)
+        original = output_path.read()
+
+    with zipfile.ZipFile(io.BytesIO(original)) as zin:
+        names = zin.namelist()
+        workbook_xml = zin.read("xl/workbook.xml").decode("utf-8")
+        rels_xml = zin.read("xl/_rels/workbook.xml.rels").decode("utf-8")
+
+        # workbook.xml names the sheet and points at an r:id; the rels file maps that
+        # r:id to the actual worksheet part. Sheet order is not part numbering.
+        sheet_match = re.search(
+            rf'<sheet[^>]*name="{re.escape(sheet_name)}"[^>]*r:id="([^"]+)"', workbook_xml
+        )
+        if not sheet_match:
+            return
+        # Attribute order varies, so find the element by Id and read Target off it.
+        rel_id = sheet_match.group(1)
+        target = ""
+        for element in re.findall(r"<Relationship\b[^>]*/?>", rels_xml):
+            if f'Id="{rel_id}"' in element:
+                target_match = re.search(r'Target="([^"]+)"', element)
+                target = target_match.group(1) if target_match else ""
+                break
+        if not target:
+            return
+
+        target = target.lstrip("/")
+        part = target if target.startswith("xl/") else f"xl/{target}"
+        if part not in names:
+            return
+
+        sheet_xml = zin.read(part).decode("utf-8")
+        for ref, value in cached.items():
+            # Only ever fills an empty <v> that already follows a formula in that cell.
+            sheet_xml, hits = re.subn(
+                rf'(<c r="{ref}"[^>]*>\s*<f[^>]*>.*?</f>\s*)(?:<v\s*/>|<v></v>)',
+                rf"\g<1><v>{value}</v>",
+                sheet_xml,
+                count=1,
+                flags=re.DOTALL,
+            )
+            if not hits:
+                # Layout changed out from under us; leave the file as openpyxl wrote it.
+                return
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = sheet_xml.encode("utf-8") if item.filename == part else zin.read(item.filename)
+                zout.writestr(item, data)
+
+    if isinstance(output_path, (str, Path)):
+        Path(output_path).write_bytes(buffer.getvalue())
+    else:
+        output_path.seek(0)
+        output_path.write(buffer.getvalue())
+        output_path.truncate()
 
 
 def generate_scoring_report(
@@ -681,6 +783,7 @@ def generate_scoring_report(
         )
 
     response_df = report.scored_df
+    faculty_cached: Dict[str, int] = {}
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         scores_df.to_excel(writer, sheet_name="Scores", index=False)
@@ -696,7 +799,7 @@ def generate_scoring_report(
         ):
             set_to_question_nos = map_paper_to_bank_questions(question_papers_path, question_bank)
 
-            _write_faculty_report(
+            faculty_cached = _write_faculty_report(
                 writer, response_df, question_bank, set_to_question_nos
             )
 
@@ -743,5 +846,8 @@ def generate_scoring_report(
                         cell.fill = green_fill
                     else:
                         cell.fill = red_fill
+
+    # Must run after the writer closes — it rewrites the saved workbook.
+    _inject_cached_values(output_path, "Faculty_Report", faculty_cached)
 
     return output_path

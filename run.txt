@@ -71,7 +71,12 @@ The student responses file is the Google Forms export, with columns:
 
   To push updates:
     reflex login    (one-time, opens a browser to authenticate)
-    reflex deploy --app-name quiz-web --project 67b7e9f1-6dba-4838-9eec-129ecd156331
+    reflex deploy --app-name quiz-web --project 67b7e9f1-6dba-4838-9eec-129ecd156331 \
+        --region bom
+
+  Keep `--region bom` (Mumbai). Reflex is websocket-driven — every click and slider
+  drag round-trips to the backend — so hosting it in the US made the UI feel laggy
+  from India. Backend response time roughly halved after moving off `sjc`.
 
   If `reflex deploy` prints only warnings and exits without deploying, the
   hosting CLI is out of date — it fails silently rather than reporting an error,
