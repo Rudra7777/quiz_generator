@@ -16,9 +16,14 @@ A web-based quiz allocation system that generates randomized question papers wit
 
 ## Local Setup
 
+Requires Python 3.10–3.12 (3.12 recommended — 3.13+ will fail to install).
+
 ```bash
 pip install -r requirements.txt
 ```
+
+Setting up on a fresh machine, especially Windows? See `INSTALL.txt` for the
+step-by-step version and the errors that usually come up.
 
 Two web UIs are available (both share the same engine and `excel_export.py` helpers):
 

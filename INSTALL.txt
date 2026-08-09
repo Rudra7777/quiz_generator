@@ -1,0 +1,159 @@
+INSTALLATION — Quiz Generator & Evaluator
+=========================================
+
+Written for Windows, because that is where it goes wrong. macOS/Linux at the end.
+Once installed, see run.txt for how to actually use the thing.
+
+
+0. YOU MAY NOT NEED TO INSTALL ANYTHING
+---------------------------------------
+The app is already live at:
+
+    https://quiz-web-silver-moon.reflex.run
+
+Nothing to install, works in any browser. Install locally only if you want to run
+it offline, or change the code.
+
+
+1. BEFORE YOU START — THE PYTHON VERSION MATTERS
+-------------------------------------------------
+Use Python 3.10, 3.11, or 3.12.  **3.12 is recommended** — that is what the cloud
+deployment runs.
+
+Do NOT use Python 3.13 or newer. This is the single most likely reason a fresh
+clone fails to install:
+
+  - reflex needs 3.10 or newer
+  - numpy 1.26.4 has no prebuilt package for 3.13+, so pip tries to COMPILE it,
+    which needs a C++ compiler that a normal Windows laptop does not have
+
+The error looks like a wall of red text ending in something like
+"error: Microsoft Visual C++ 14.0 or greater is required" or
+"Failed building wheel for numpy". That is a Python version problem, not a
+numpy problem. Install 3.12 and it goes away.
+
+Check what you have:
+
+    python --version
+
+Get Python 3.12 from https://www.python.org/downloads/windows/
+Pick the newest "Python 3.12.x" entry and download its "Windows installer
+(64-bit)". Do not just click the big yellow button on the front page — that
+gives you the newest Python, which is too new.
+
+    IMPORTANT: on the first screen of the installer, tick
+    "Add python.exe to PATH" before clicking Install.
+    Nearly every "python is not recognized" error comes from missing this.
+
+You also need Git: https://git-scm.com/download/win
+
+
+2. INSTALL (WINDOWS, PowerShell)
+---------------------------------
+Open PowerShell and run these one at a time:
+
+    git clone https://github.com/Rudra7777/quiz_generator.git
+    cd quiz_generator
+
+Create an isolated environment. This keeps the project's packages away from
+anything else on the laptop, which is the other big source of "works on my
+machine" failures:
+
+    py -3.12 -m venv .venv
+    .venv\Scripts\Activate.ps1
+
+Your prompt should now start with (.venv). If activation fails with
+"running scripts is disabled on this system", run this once, then try again:
+
+    Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+
+Now install:
+
+    python -m pip install --upgrade pip
+    pip install -r requirements.txt
+
+That takes a few minutes. Every version is pinned in requirements.txt, so you
+get exactly the set this project is known to work on.
+
+
+3. CHECK IT WORKED
+-------------------
+    pytest -q
+
+Expected: "11 passed". If you get that, the install is good.
+
+
+4. RUN IT
+----------
+Streamlit UI — fewer moving parts, start here if anything went wrong:
+
+    streamlit run app.py
+
+Reflex UI — the nicer one, but needs a bit more setup (see section 5):
+
+    reflex run
+
+Then open http://localhost:3000
+
+Remember: every new PowerShell window needs the environment activated again:
+
+    cd quiz_generator
+    .venv\Scripts\Activate.ps1
+
+
+5. REFLEX ON WINDOWS — THE EXTRA BITS
+--------------------------------------
+`reflex run` is not pure Python. The first time it starts, it downloads and runs
+Bun (a JavaScript toolchain) to build the frontend. Three things commonly break:
+
+  a) "Install Failed - You are missing a DLL required to run bun.exe"
+     Install the Microsoft Visual C++ 2015-2022 Redistributable (x64):
+     https://aka.ms/vs/17/release/vc_redist.x64.exe
+     Restart PowerShell afterwards.
+
+  b) First run hangs or fails downloading Bun.
+     It needs internet access. College Wi-Fi, a firewall, or antivirus can block
+     the download. Try a phone hotspot for the first run — after that it is
+     cached and works offline.
+
+  c) "Port 3000 is already in use"
+     Something else is on that port:
+         reflex run --frontend-port 3001
+
+If Reflex will not cooperate on that laptop, just use the Streamlit UI. It needs
+none of this — no Bun, no Node, no downloads. Same engine, same Excel output.
+
+
+6. macOS / LINUX
+-----------------
+Same thing, different activation command:
+
+    git clone https://github.com/Rudra7777/quiz_generator.git
+    cd quiz_generator
+    python3.12 -m venv .venv
+    source .venv/bin/activate
+    python -m pip install --upgrade pip
+    pip install -r requirements.txt
+    pytest -q
+
+
+7. IF IT STILL FAILS
+---------------------
+Copy the FULL error text — the last 20 lines, not just the last one. The useful
+part is almost never the final line. Then check:
+
+    python --version                 should say 3.10, 3.11 or 3.12
+    where python                     should point inside .venv, not to a system
+                                     or Anaconda Python
+    pip list                         versions should match requirements.txt
+
+A mismatch on the second one means the environment is not active — the packages
+went somewhere else. Re-run the activate command.
+
+
+8. A NOTE ON THE EXCEL REPORTS
+-------------------------------
+When Excel opens scoring_report.xlsx after downloading it, Windows may show a
+yellow "PROTECTED VIEW" bar. Click "Enable Editing". The Count and AnsC columns
+are live formulas so that correcting the answer key recalculates the marks, and
+Excel will not run formulas until you do.

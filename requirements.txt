@@ -1,6 +1,13 @@
-streamlit
-reflex
-pandas
-openpyxl
-numpy
-pytest
+# Pinned to the versions this project is developed and deployed on.
+# Reflex Cloud runs Python 3.12 — use 3.10-3.12 locally too. See INSTALL.txt.
+#
+# Do not loosen these to bare package names. An unpinned install pulls whatever
+# is newest on the day, which is how a clone that works on one machine fails on
+# the next.
+
+streamlit==1.37.1
+reflex==0.9.6.post1
+pandas==2.3.3
+openpyxl==3.1.5
+numpy==1.26.4
+pytest==7.4.4
