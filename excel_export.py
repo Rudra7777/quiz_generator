@@ -120,6 +120,10 @@ def create_formatted_excel(
         # Column widths & row heights
         for ch, width in zip('ABCDEFGH', (6, 8, 10, 55, 28, 28, 28, 28)):
             ws.column_dimensions[ch].width = width
+        # Col B carries the bare bank number for the answer-checker to read back
+        # (see response_generator._attach_bank_no); faculty only want to see the
+        # printed 'Q- 27' form in Col C, so hide B from view and from printouts.
+        ws.column_dimensions['B'].hidden = True
         for r in range(3, len(quiz) + 3):
             ws.row_dimensions[r].height = 45
 
