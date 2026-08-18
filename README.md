@@ -78,6 +78,8 @@ Your Excel file should have these columns:
 ## Output
 
 The generated Excel contains:
+- **All_Sets**: Every set stacked one below another, set up to print on A4 portrait
+  with each set starting on a fresh page. This is the sheet to print.
 - **S-01 to S-NN**: Individual question papers (no answers)
 - **Answer_Key**: Correct answers for teachers
 - **Allocation_Table**: Original allocation by difficulty

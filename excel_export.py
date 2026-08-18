@@ -16,8 +16,116 @@ import numpy as np
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from openpyxl.worksheet.pagebreak import Break
+from openpyxl.worksheet.page import PageMargins
+from openpyxl.worksheet.properties import PageSetupProperties
 
 from excel_handler import load_question_bank, set_label, FullQuestionBank
+
+
+# Sheet holding every set stacked one below another, for A4 portrait printing.
+ALL_SETS_SHEET = "All_Sets"
+
+# Column widths for the stacked print sheet. The visible ones total 92, which is
+# what A4 portrait prints at full size — the per-set sheets stay wide (183) since
+# they are read on screen, not printed.
+ALL_SETS_WIDTHS = {'A': 4, 'B': 8, 'C': 8, 'D': 26, 'E': 13.5, 'F': 13.5, 'G': 13.5, 'H': 13.5}
+
+# ── Set block styles ──────────────────────────────────────────────────────────
+THIN_BORDER = Border(
+    left=Side(style='thin'), right=Side(style='thin'),
+    top=Side(style='thin'), bottom=Side(style='thin')
+)
+WRAP_ALIGN = Alignment(wrap_text=True, vertical='top')
+CENTER_ALIGN = Alignment(horizontal='center', vertical='center')
+LEFT_ALIGN = Alignment(horizontal='left', vertical='center')
+BOLD_FONT = Font(bold=True)
+QSET_FONT = Font(bold=True, color="FF0000")
+QSET_FILL = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+QCD_FILL = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+
+
+def _write_set_block(ws, top_row: int, label: str, quiz: list, question_bank: FullQuestionBank) -> int:
+    """
+    Draw one set's paper starting at `top_row`, returning the row after it.
+
+    Used for both a set's own sheet (top_row=1) and its block on the stacked
+    print sheet, so the printed paper is the same paper the sheet shows.
+    """
+    # Set label, then blank Name / Roll No fields to fill in by hand
+    for col in (1, 2, 3):
+        cell = ws.cell(row=top_row, column=col, value="QSet:" if col == 1 else label)
+        cell.font = QSET_FONT
+        cell.fill = QSET_FILL
+        cell.border = THIN_BORDER
+        cell.alignment = CENTER_ALIGN
+
+    ws.merge_cells(start_row=top_row, start_column=4, end_row=top_row, end_column=6)
+    ws.merge_cells(start_row=top_row, start_column=7, end_row=top_row, end_column=8)
+    ws.cell(row=top_row, column=4, value="Name:").font = BOLD_FONT
+    ws.cell(row=top_row, column=7, value="Roll No:").font = BOLD_FONT
+    for col in range(4, 9):
+        ws.cell(row=top_row, column=col).border = THIN_BORDER
+        ws.cell(row=top_row, column=col).alignment = LEFT_ALIGN
+
+    # Headers. Two QCd columns — the bare Question Number and its printed
+    # 'Q- 27' form, which is what students copy into the form.
+    header_row = top_row + 1
+    for col, header in enumerate(['Sr', 'QCd', 'QCd', 'Question', 'A', 'B', 'C', 'D'], 1):
+        cell = ws.cell(row=header_row, column=col, value=header)
+        cell.font = BOLD_FONT
+        cell.border = THIN_BORDER
+        cell.alignment = CENTER_ALIGN
+    ws.cell(row=header_row, column=2).fill = QCD_FILL
+
+    # Questions
+    for q_idx, question_id in enumerate(quiz):
+        q = question_bank.get_by_id(question_id)
+        row = header_row + 1 + q_idx
+        ws.cell(row=row, column=1, value=q_idx + 1)
+        ws.cell(row=row, column=2, value=q.question_no).fill = QCD_FILL
+        ws.cell(row=row, column=3, value=question_code(q.question_no))
+        ws.cell(row=row, column=4, value=q.question_text)
+        options = (q.option_a, q.option_b, q.option_c, q.option_d)
+        for col, (letter, text) in enumerate(zip('ABCD', options), 5):
+            ws.cell(row=row, column=col, value=f"{letter}] {text}")
+
+        for col in range(1, 9):
+            cell = ws.cell(row=row, column=col)
+            cell.border = THIN_BORDER
+            cell.alignment = CENTER_ALIGN if col <= 3 else WRAP_ALIGN
+
+    return header_row + 1 + len(quiz)
+
+
+def _write_all_sets_sheet(wb, shuffled_matrix: list, question_bank: FullQuestionBank) -> None:
+    """
+    Write every set one below another on a single A4-portrait print sheet.
+
+    Faculty print this rather than opening 65 separate sheets. Each set starts on
+    a fresh page so the papers can be separated, and row heights are left unset so
+    Excel fits each row to its own wrapped text.
+    """
+    ws = wb.create_sheet(title=ALL_SETS_SHEET, index=0)
+
+    row = 1
+    for student_idx, quiz in enumerate(shuffled_matrix):
+        row = _write_set_block(ws, row, set_label(student_idx + 1), quiz, question_bank)
+        if student_idx < len(shuffled_matrix) - 1:
+            ws.row_breaks.append(Break(id=row - 1))
+
+    for ch, width in ALL_SETS_WIDTHS.items():
+        ws.column_dimensions[ch].width = width
+    # Col B carries the bare bank number only so the two sheets stay identical;
+    # faculty print the 'Q- 27' form in Col C, so B is hidden here as well.
+    ws.column_dimensions['B'].hidden = True
+
+    ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+    ws.page_margins = PageMargins(left=0.4, right=0.4, top=0.5, bottom=0.5, header=0.2, footer=0.2)
 
 
 def qid_to_number(question_id: str, question_bank: FullQuestionBank) -> int:
@@ -53,17 +161,9 @@ def create_formatted_excel(
     header_font_white = Font(bold=True, size=11, color="FFFFFF")
     green_fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
     orange_fill = PatternFill(start_color="ED7D31", end_color="ED7D31", fill_type="solid")
-    thin_border = Border(
-        left=Side(style='thin'), right=Side(style='thin'),
-        top=Side(style='thin'), bottom=Side(style='thin')
-    )
-    wrap_align = Alignment(wrap_text=True, vertical='top')
-    center_align = Alignment(horizontal='center', vertical='center')
-    left_align = Alignment(horizontal='left', vertical='center')
-    bold_font = Font(bold=True)
-    qset_font = Font(bold=True, color="FF0000")
-    qset_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-    qcd_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    thin_border = THIN_BORDER
+    wrap_align = WRAP_ALIGN
+    center_align = CENTER_ALIGN
 
     # Remove default sheet
     wb.remove(wb.active)
@@ -74,48 +174,7 @@ def create_formatted_excel(
     for student_idx, quiz in enumerate(shuffled_matrix):
         label = set_label(student_idx + 1)
         ws = wb.create_sheet(title=label)
-
-        # Row 1: set label, then blank Name / Roll No fields to fill in by hand
-        for col in (1, 2, 3):
-            cell = ws.cell(row=1, column=col, value="QSet:" if col == 1 else label)
-            cell.font = qset_font
-            cell.fill = qset_fill
-            cell.border = thin_border
-            cell.alignment = center_align
-
-        ws.merge_cells(start_row=1, start_column=4, end_row=1, end_column=6)
-        ws.merge_cells(start_row=1, start_column=7, end_row=1, end_column=8)
-        ws.cell(row=1, column=4, value="Name:").font = bold_font
-        ws.cell(row=1, column=7, value="Roll No:").font = bold_font
-        for col in range(4, 9):
-            ws.cell(row=1, column=col).border = thin_border
-            ws.cell(row=1, column=col).alignment = left_align
-
-        # Row 2: headers. Two QCd columns — the bare Question Number and its
-        # printed 'Q- 27' form, which is what students copy into the form.
-        for col, header in enumerate(['Sr', 'QCd', 'QCd', 'Question', 'A', 'B', 'C', 'D'], 1):
-            cell = ws.cell(row=2, column=col, value=header)
-            cell.font = bold_font
-            cell.border = thin_border
-            cell.alignment = center_align
-        ws.cell(row=2, column=2).fill = qcd_fill
-
-        # Questions
-        for q_idx, question_id in enumerate(quiz):
-            q = question_bank.get_by_id(question_id)
-            row = q_idx + 3
-            ws.cell(row=row, column=1, value=q_idx + 1)
-            ws.cell(row=row, column=2, value=q.question_no).fill = qcd_fill
-            ws.cell(row=row, column=3, value=question_code(q.question_no))
-            ws.cell(row=row, column=4, value=q.question_text)
-            options = (q.option_a, q.option_b, q.option_c, q.option_d)
-            for col, (letter, text) in enumerate(zip('ABCD', options), 5):
-                ws.cell(row=row, column=col, value=f"{letter}] {text}")
-
-            for col in range(1, 9):
-                cell = ws.cell(row=row, column=col)
-                cell.border = thin_border
-                cell.alignment = center_align if col <= 3 else wrap_align
+        _write_set_block(ws, 1, label, quiz, question_bank)
 
         # Column widths & row heights
         for ch, width in zip('ABCDEFGH', (6, 8, 10, 55, 28, 28, 28, 28)):
@@ -340,6 +399,11 @@ def create_formatted_excel(
         ws.column_dimensions[ch].width = 20
     ws.column_dimensions['G'].width = 10
     ws.column_dimensions['H'].width = 12
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Combined Print Sheet (every set stacked, A4 portrait)
+    # ══════════════════════════════════════════════════════════════════════
+    _write_all_sets_sheet(wb, shuffled_matrix, question_bank)
 
     # ── Save ──────────────────────────────────────────────────────────────
     output = io.BytesIO()
