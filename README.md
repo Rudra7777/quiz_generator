@@ -12,7 +12,7 @@ A web-based quiz allocation system that generates randomized question papers wit
 
 ## Live Demo
 
-🚀 [View App on Reflex Cloud](https://quiz-web-silver-moon.reflex.run)
+🚀 [View App on Reflex Cloud](https://quiz-generator-blue-piano.reflex.run)
 
 ## Local Setup
 
@@ -45,7 +45,7 @@ The Reflex UI is deployed to [Reflex Cloud](https://build.reflex.dev), which hos
 
 ```bash
 reflex login    # one-time, opens a browser to authenticate
-reflex deploy --app-name quiz-web --project 67b7e9f1-6dba-4838-9eec-129ecd156331
+reflex deploy --app-name quiz-generator --project 67b7e9f1-6dba-4838-9eec-129ecd156331 --region sin
 ```
 
 This rebuilds the app and pushes it to the same live URL above. Currently on the Free tier (1 CPU / 1GB RAM, up to 5 deployments).

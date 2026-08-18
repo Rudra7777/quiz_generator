@@ -9,7 +9,7 @@ Once installed, see run.txt for how to actually use the thing.
 ---------------------------------------
 The app is already live at:
 
-    https://quiz-web-silver-moon.reflex.run
+    https://quiz-generator-blue-piano.reflex.run
 
 Nothing to install, works in any browser. Install locally only if you want to run
 it offline, or change the code.
