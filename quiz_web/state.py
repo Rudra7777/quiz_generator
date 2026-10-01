@@ -19,6 +19,7 @@ from openpyxl import load_workbook
 
 from allocator import QuizStructure, allocate_quizzes, shuffle_all_quizzes
 from excel_handler import load_question_bank, SET_LABEL_RE
+from case_reader import read_case_paragraphs
 from response_generator import generate_responses
 from answer_checker import (
     load_response_sheet,
@@ -53,6 +54,11 @@ class GenerateState(rx.State):
     # Backend-only (never synced to the browser)
     _bank_bytes: bytes = b""
     _papers_bytes: bytes = b""
+    _case_paragraphs: list[str] = []
+
+    # Optional case study, printed above the questions on every set
+    case_uploaded: bool = False
+    case_filename: str = ""
 
     # Uploaded bank
     bank_uploaded: bool = False
@@ -212,6 +218,30 @@ class GenerateState(rx.State):
                 os.remove(path)
 
     @rx.event
+    async def handle_case_upload(self, files: list[rx.UploadFile]):
+        self.status = ""
+        self.error = ""
+        self.papers_ready = False
+        if not files:
+            return
+        filename = files[0].filename or ""
+        try:
+            self._case_paragraphs = read_case_paragraphs(filename, await files[0].read())
+            self.case_uploaded = True
+            self.case_filename = filename
+            self.status = f"Case loaded — {len(self._case_paragraphs)} paragraph(s)."
+        except Exception as exc:  # noqa: BLE001 - surface any read error to the user
+            self.clear_case()
+            self.error = f"Could not read case: {exc}"
+
+    @rx.event
+    def clear_case(self):
+        self._case_paragraphs = []
+        self.case_uploaded = False
+        self.case_filename = ""
+        self.papers_ready = False
+
+    @rx.event
     def generate_papers(self):
         self.status = ""
         self.error = ""
@@ -249,6 +279,7 @@ class GenerateState(rx.State):
                 shuffled_matrix=shuffled_matrix,
                 usage_counts=usage_counts,
                 question_bank=bank,
+                case_paragraphs=self._case_paragraphs,
             )
             self.papers_ready = True
             self.last_seed = run_seed
@@ -280,7 +311,8 @@ class EvaluateState(rx.State):
     _chk_papers_bytes: bytes = b""
     _chk_responses_bytes: bytes = b""
 
-    # Generate dummy responses
+    # Generate dummy responses — a rehearsal tool, hidden until asked for
+    show_dummy: bool = False
     gen_papers_uploaded: bool = False
     gen_papers_filename: str = ""
     gen_students: int = 70
@@ -317,6 +349,10 @@ class EvaluateState(rx.State):
         return self.extra_rate >= 0
 
     # ── Setters ───────────────────────────────────────────────────────────
+    @rx.event
+    def toggle_dummy(self):
+        self.show_dummy = not self.show_dummy
+
     @rx.event
     def set_gen_students(self, value: str):
         self.gen_students = _to_int(value, self.gen_students)

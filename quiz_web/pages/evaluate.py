@@ -116,7 +116,7 @@ def _generate_responses_step() -> rx.Component:
 
 def _check_score_step() -> rx.Component:
     return section(
-        "2",
+        rx.cond(EvaluateState.show_dummy, "2", "1"),
         "Check & score responses",
         "Validate submissions against the answer key and produce a scoring report.",
         rx.vstack(
@@ -215,12 +215,24 @@ def evaluate_page() -> rx.Component:
         rx.vstack(
             rx.heading("Evaluate Answers", size="7"),
             rx.text(
-                "Simulate responses, then validate and score them against the answer key.",
+                "Validate and score student submissions against the answer key.",
                 size="3", color_scheme="gray",
             ),
             spacing="1",
             align="start",
         ),
-        _generate_responses_step(),
+        rx.button(
+            rx.icon(rx.cond(EvaluateState.show_dummy, "eye-off", "flask-conical"), size=16),
+            rx.cond(
+                EvaluateState.show_dummy,
+                "Hide dummy responses",
+                "Show dummy responses",
+            ),
+            on_click=EvaluateState.toggle_dummy,
+            variant="soft",
+            color_scheme="gray",
+            size="2",
+        ),
+        rx.cond(EvaluateState.show_dummy, _generate_responses_step()),
         _check_score_step(),
     )

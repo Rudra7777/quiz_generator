@@ -74,8 +74,11 @@ def upload_zone(
     uploaded=False,
     filename="",
     tint: str = "indigo",
+    accept: dict | None = None,
+    hint: str = "Drop an .xlsx file or click to browse",
 ) -> rx.Component:
-    """A dashed drag-and-drop area for a single .xlsx file with rich animations.
+    """A dashed drag-and-drop area for a single file (.xlsx unless `accept` says
+    otherwise) with rich animations.
 
     `uploaded`/`filename` should come from backend state (set once the file has
     actually been read and processed), not `rx.selected_files` — that only reflects
@@ -87,7 +90,7 @@ def upload_zone(
         rx.icon("file-up", size=28, color=f"var(--{tint}-9)"),
         rx.text(prompt, size="2", weight="bold"),
         rx.text(
-            "Drop an .xlsx file or click to browse",
+            hint,
             size="1",
             color_scheme="gray",
         ),
@@ -190,7 +193,7 @@ def upload_zone(
                 idle_content,
             ),
             id=upload_id,
-            accept={
+            accept=accept or {
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"]
             },
             max_files=1,

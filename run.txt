@@ -4,6 +4,8 @@ HOW TO RUN — Quiz Generator & Evaluator
 Input files live in the `input/` folder:
   - input/question_bank.xlsx      (70 questions: 12 Hard, 30 Medium, 28 Easy)
   - input/question_bank_72.xlsx   (72 questions: 12 Hard, 30 Medium, 30 Easy)
+  - input/case_harbourline_coffee.docx, input/case_northgate_cycles.pdf
+                                  (sample case studies for the optional case upload)
 
 A question bank Excel must have these columns:
   question_no, question, option_a, option_b, option_c, option_d, answer (A/B/C/D), difficulty (H/M/L)
@@ -26,10 +28,12 @@ The student responses file is the Google Forms export, with columns:
   reflex run
 
   Then open http://localhost:3000
-  - "Generate Papers" page: upload a bank from input/, configure, download question_papers.xlsx
-  - "Evaluate Answers" page: generate dummy responses (a stand-in for a real Google
-    Forms download), then check & score, download scoring_report.xlsx
-    Sheets: Scores, Summary, Validation, Faculty_Report, Responses_Review
+  - "Generate Papers" page: upload a bank from input/, optionally a case study (PDF/DOCX)
+    to print above the questions on every set, configure, download question_papers.xlsx
+  - "Evaluate Answers" page: check & score the Google Forms download, then download
+    scoring_report.xlsx. To rehearse without real submissions, click "Show dummy
+    responses" (hidden by default) and generate a stand-in responses file first.
+    Sheets: Scores, Summary, Validation, Faculty_Report
 
 
 3. WEB APP — STREAMLIT UI (original)

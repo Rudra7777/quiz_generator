@@ -71,20 +71,22 @@ def _read_set_sheet(source, sheet_name: str) -> pd.DataFrame:
     attempt here re-parses whatever it is handed, and a papers workbook holds one
     sheet per student, so re-opening the path costs the whole file each time.
     """
-    for header_row in (0, 1, 2, 3, 4, 5):
-        try:
-            df = pd.read_excel(source, sheet_name=sheet_name, header=header_row)
-        except Exception:
+    def _normalize(value) -> str:
+        return str(value).strip().lower().replace(" ", "_").replace(".", "")
+
+    # The header row is not at a fixed position — a case study printed above the
+    # questions pushes it down — so find it first, then read from it.
+    try:
+        raw = pd.read_excel(source, sheet_name=sheet_name, header=None)
+    except Exception as exc:
+        raise ValueError(f"Could not read '{sheet_name}'.") from exc
+
+    for header_row, values in raw.iterrows():
+        if "question" not in {_normalize(v) for v in values if pd.notna(v)}:
             continue
 
-        normalized = {
-            str(col).strip().lower().replace(" ", "_").replace(".", ""): col
-            for col in df.columns
-        }
-        q_col = normalized.get("question")
-
-        if q_col is None:
-            continue
+        df = pd.read_excel(source, sheet_name=sheet_name, header=header_row)
+        q_col = next(col for col in df.columns if _normalize(col) == "question")
 
         out = df.rename(columns={q_col: "Question"}).copy()
         out = out[out["Question"].notna()]

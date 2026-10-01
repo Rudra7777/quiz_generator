@@ -38,9 +38,44 @@ def _upload_step() -> rx.Component:
     )
 
 
-def _config_step() -> rx.Component:
+def _case_step() -> rx.Component:
     return section(
         "2",
+        "Case study (optional)",
+        "A PDF or DOCX printed above the questions on every set. Text only — images and tables are left out.",
+        rx.vstack(
+            upload_zone(
+                "case_upload",
+                GenerateState.handle_case_upload(rx.upload_files(upload_id="case_upload")),
+                "Case study",
+                uploaded=GenerateState.case_uploaded,
+                filename=GenerateState.case_filename,
+                accept={
+                    "application/pdf": [".pdf"],
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+                },
+                hint="Drop a .pdf or .docx file or click to browse",
+            ),
+            rx.cond(
+                GenerateState.case_uploaded,
+                rx.button(
+                    rx.icon("x", size=16),
+                    "Remove case",
+                    on_click=GenerateState.clear_case,
+                    variant="soft",
+                    color_scheme="gray",
+                    size="2",
+                ),
+            ),
+            spacing="3",
+            width="100%",
+        ),
+    )
+
+
+def _config_step() -> rx.Component:
+    return section(
+        "3",
         "Configuration",
         "How many papers, and how many questions each.",
         rx.hstack(
@@ -115,7 +150,7 @@ def _difficulty_step() -> rx.Component:
     )
 
     return section(
-        "3",
+        "4",
         "Difficulty distribution",
         "Set exact counts, or split by percentage of the quiz size.",
         rx.vstack(
@@ -150,7 +185,7 @@ def _difficulty_step() -> rx.Component:
 
 def _seed_step() -> rx.Component:
     return section(
-        "4",
+        "5",
         "Randomization",
         "Use a fixed seed to reproduce an identical allocation.",
         rx.vstack(
@@ -176,7 +211,7 @@ def _seed_step() -> rx.Component:
 
 def _generate_step() -> rx.Component:
     return section(
-        "5",
+        "6",
         "Generate question papers",
         "Produces one sheet per student plus answer key, tables, and an embedded bank.",
         rx.vstack(
@@ -228,6 +263,7 @@ def generate_page() -> rx.Component:
             align="start",
         ),
         _upload_step(),
+        _case_step(),
         _config_step(),
         _difficulty_step(),
         _seed_step(),

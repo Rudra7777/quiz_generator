@@ -24,7 +24,7 @@ QUESTIONS_PER_SET = HARD + MEDIUM + EASY
 BLOCK_ROWS = QUESTIONS_PER_SET + 2
 
 
-def _papers(num_students: int, seed: int = 7):
+def _papers(num_students: int, seed: int = 7, case_paragraphs=()):
     """Build a real papers workbook and hand back the loaded sheet plus its sets."""
     bank = load_question_bank(str(QUESTION_BANK))
     allocation_matrix, usage_counts = allocate_quizzes(
@@ -43,6 +43,7 @@ def _papers(num_students: int, seed: int = 7):
         shuffled_matrix=shuffled_matrix,
         usage_counts=usage_counts,
         question_bank=bank,
+        case_paragraphs=case_paragraphs,
     )
     return data, shuffled_matrix, bank
 
@@ -167,3 +168,93 @@ def test_part_two_reader_still_maps_the_new_workbook(tmp_path):
     for set_idx, label in enumerate(sorted(set_map)):
         expected = [bank.get_by_id(qid).question_no for qid in shuffled_matrix[set_idx]]
         assert set_map[label] == expected
+
+
+def test_question_bank_sheet_highlights_only_the_correct_option():
+    """Faculty check the key by eye: exactly the right option cell is filled green."""
+    data, _, bank = _papers(2)
+    ws = load_workbook(io.BytesIO(data))["Question_Bank"]
+
+    for offset, q in enumerate(bank.get_all()):
+        row = 4 + offset
+        filled = [
+            letter
+            for letter, col in zip('ABCD', range(3, 7))
+            if (ws.cell(row=row, column=col).fill.start_color.rgb or "").endswith("C6EFCE")
+        ]
+        assert filled == [q.answer.strip().upper()], f"question {q.question_no}"
+
+
+CASE = [
+    "A mid-sized retailer is deciding whether to move its stock system to the cloud.",
+    "The finance team is worried about cost. " * 200,  # long enough to need splitting
+]
+
+
+def _case_layout(ws, top_row: int):
+    """Return (case texts, header row) for the set block starting at `top_row`."""
+    assert ws.cell(row=top_row + 1, column=1).value == "Case Study"
+    row, texts = top_row + 2, []
+    while ws.cell(row=row, column=1).value != 'Sr':
+        texts.append(ws.cell(row=row, column=1).value)
+        row += 1
+    return texts, row
+
+
+def test_case_sits_between_the_set_line_and_the_questions_on_every_set():
+    data, shuffled_matrix, _ = _papers(3, case_paragraphs=CASE)
+    wb = load_workbook(io.BytesIO(data))
+
+    for set_idx in range(len(shuffled_matrix)):
+        ws = wb[set_label(set_idx + 1)]
+        assert ws.cell(row=1, column=2).value == set_label(set_idx + 1)
+        texts, header_row = _case_layout(ws, 1)
+
+        # Every word of the case survives, in order, however it was split into rows.
+        assert " ".join(texts).split() == " ".join(CASE).split()
+        assert texts[0] == CASE[0]
+        assert len(texts) > len(CASE), "the long paragraph should span several rows"
+
+        for row in range(2, header_row):
+            assert f"A{row}:H{row}" in {str(r) for r in ws.merged_cells.ranges}
+        for row in range(3, header_row):
+            assert 0 < ws.row_dimensions[row].height <= 409  # Excel's row height cap
+
+        # Question rows keep their height below the case.
+        assert ws.row_dimensions[header_row + 1].height == 45
+        assert ws.cell(row=header_row + 1, column=1).value == 1
+
+
+def test_all_sets_prints_the_case_in_every_block_and_still_breaks_per_set():
+    data, shuffled_matrix, _ = _papers(3, case_paragraphs=CASE)
+    ws = load_workbook(io.BytesIO(data))[ALL_SETS_SHEET]
+
+    top, tops = 1, []
+    for set_idx in range(len(shuffled_matrix)):
+        tops.append(top)
+        assert ws.cell(row=top, column=2).value == set_label(set_idx + 1)
+        texts, header_row = _case_layout(ws, top)
+        assert " ".join(texts).split() == " ".join(CASE).split()
+        top = header_row + 1 + QUESTIONS_PER_SET
+
+    breaks = sorted(brk.id for brk in ws.row_breaks.brk)
+    assert breaks == [t - 1 for t in tops[1:]]
+
+
+def test_part_two_reader_maps_a_workbook_with_a_case(tmp_path):
+    data, shuffled_matrix, bank = _papers(3, case_paragraphs=CASE)
+    path = tmp_path / "question_papers.xlsx"
+    path.write_bytes(data)
+
+    set_map = map_paper_to_bank_questions(str(path), bank)
+
+    for set_idx, label in enumerate(sorted(set_map)):
+        expected = [bank.get_by_id(qid).question_no for qid in shuffled_matrix[set_idx]]
+        assert set_map[label] == expected
+
+
+def test_no_case_leaves_the_paper_unchanged():
+    data, _, _ = _papers(2)
+    ws = load_workbook(io.BytesIO(data))[set_label(1)]
+
+    assert ws.cell(row=2, column=1).value == 'Sr'

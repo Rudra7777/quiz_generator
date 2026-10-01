@@ -85,6 +85,14 @@ The generated Excel contains:
 - **Allocation_Table**: Original allocation by difficulty
 - **Shuffled_Table**: Randomized order per student
 - **Evaluation**: Usage statistics and metrics
+- **Question_Bank**: The full bank, with each question's correct option highlighted green.
+  Part 2 reads the bank back out of this sheet.
+
+Optionally upload a case study (PDF or DOCX) on the Generate page. Its text is printed
+under a "Case Study" heading on every set, above the questions. Only the text is kept:
+images, tables and page layout are dropped, and a scanned PDF has no text to extract.
+A PDF has no real paragraphs, only lines, so a paragraph break is read from the gap
+between lines; a heading set close above its text can be joined onto the first paragraph.
 
 Set labels are `S-01`, `S-02`, … everywhere — question paper sheets, the answer key, and
 the Google Form's "Question Set" dropdown all use the same string, so responses join
@@ -114,11 +122,15 @@ dropped ones are listed on the `Validation` sheet.
 `scoring_report.xlsx` contains:
 - **Scores**: per student — Roll Number, Name, Email, Set, Assigned, Attempted, Correct, Wrong
 - **Summary**: cohort averages, pass rate, and mark distribution in columns A–B, plus a live
-  Excel chart — a mark-by-mark histogram with a fitted normal curve over it. Chart source
-  data sits in columns D–F.
+  Excel chart — a mark-by-mark histogram with a fitted normal curve over it, running from
+  the lowest mark anyone scored to the highest. Chart source data sits in columns D–F.
 - **Validation**: duplicate submissions, and anyone who answered outside their set
 - **Faculty_Report**: the layout the faculty asked for — answer key strip on rows 1–2, then
   one row per student with live `Count` and `AnsC` formulas (see `docs/adr/0002`).
+  Under the table, three rows rate every question by its perceived difficulty: `Allocated`
+  (how many students had it on their paper), `Wrong` (how many of them did not get it
+  right — a blank counts as wrong) and `Wrong%`, shaded white to red so the hardest
+  questions stand out. Students who answered it without being allocated it are left out.
   Answers are colour-coded on two axes: the text says right or wrong against the key
   (**blue** / ***red italic***), the background says whose question it was — light green
   across the whole of the student's own set, answered or not, so the ones they skipped
@@ -126,12 +138,13 @@ dropped ones are listed on the `Validation` sheet.
   on their paper (see `docs/adr/0003`). Conditional
   formatting, so fixing a key letter in row 2 recolours the sheet and recomputes the marks
   together. Hidden helper columns to the right of the answers drive both — don't delete them.
-- **Responses_Review**: every answer cell colour-coded green/red
 
 ## Sample Files
 
 - `input/question_bank.xlsx` - 70 questions (12H, 30M, 28E)
 - `input/question_bank_72.xlsx` - 72 questions (12H, 30M, 30E)
+- `input/case_harbourline_coffee.docx` - sample case study (DOCX)
+- `input/case_northgate_cycles.pdf` - sample case study (PDF)
 
 ## Tech Stack
 

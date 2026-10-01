@@ -80,7 +80,7 @@ get exactly the set this project is known to work on.
 -------------------
     pytest -q
 
-Expected: "11 passed". If you get that, the install is good.
+Expected: "30 passed". If you get that, the install is good.
 
 
 4. RUN IT
@@ -154,6 +154,7 @@ went somewhere else. Re-run the activate command.
 8. A NOTE ON THE EXCEL REPORTS
 -------------------------------
 When Excel opens scoring_report.xlsx after downloading it, Windows may show a
-yellow "PROTECTED VIEW" bar. Click "Enable Editing". The Count and AnsC columns
-are live formulas so that correcting the answer key recalculates the marks, and
-Excel will not run formulas until you do.
+yellow "PROTECTED VIEW" bar. Click "Enable Editing". The Count and AnsC columns,
+and the Allocated / Wrong / Wrong% rows under the table, are live formulas so that
+correcting the answer key recalculates them, and Excel will not run formulas until
+you do.

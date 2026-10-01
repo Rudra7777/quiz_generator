@@ -18,7 +18,7 @@ import zipfile
 
 import pandas as pd
 from openpyxl.chart import BarChart, LineChart, Reference
-from openpyxl.formatting.rule import Rule
+from openpyxl.formatting.rule import ColorScaleRule, Rule
 from openpyxl.styles import Font, PatternFill
 from openpyxl.styles.differential import DifferentialStyle
 from openpyxl.utils import get_column_letter
@@ -333,8 +333,9 @@ def _write_summary_charts(ws, report: ScoringReport, max_marks: int) -> None:
     Summary metrics table (which stays in columns A-B). Chart source data goes in
     columns D-F, the chart itself at H2.
 
-    The histogram is filled in for every mark from 0 to max, including the marks
-    nobody scored, so the bars sit on an even axis and the curve reads properly.
+    The axis runs from the lowest mark anyone scored to the highest, so the empty
+    tail of zero-student marks is left off and the curve sits over real data. Marks
+    nobody scored *inside* that range keep a zero bar, so the axis stays even.
     """
     scores = [r.correct for r in report.student_reports]
     if not scores or max_marks <= 0:
@@ -352,7 +353,8 @@ def _write_summary_charts(ws, report: ScoringReport, max_marks: int) -> None:
         ws[cell].font = Font(bold=True)
 
     observed = Counter(scores)
-    for offset, marks in enumerate(range(0, max_marks + 1)):
+    lowest, highest = min(scores), max(scores)
+    for offset, marks in enumerate(range(lowest, highest + 1)):
         row = 2 + offset
         ws.cell(row=row, column=4, value=marks)
         ws.cell(row=row, column=5, value=observed.get(marks, 0))
@@ -366,7 +368,7 @@ def _write_summary_charts(ws, report: ScoringReport, max_marks: int) -> None:
             # Everyone scored the same — a normal curve would be a divide by zero.
             ws.cell(row=row, column=6, value=None)
 
-    last_row = 1 + (max_marks + 1)
+    last_row = 1 + (highest - lowest + 1)
 
     histogram = BarChart()
     histogram.type = "col"
@@ -467,12 +469,72 @@ def _color_code_answers(
         )
 
 
+def _write_question_stats(
+    ws,
+    question_nos: List[int],
+    first_answer_col: int,
+    mask_first_col: int,
+    last_row: int,
+    allocated_by_q: Counter,
+    correct_by_q: Counter,
+    cached_values: Dict[str, float],
+) -> None:
+    """
+    Write Allocated / Wrong / Wrong% under every question column of Faculty_Report,
+    one blank row below the last student.
+
+    Live formulas like Count and AnsC, so correcting a key letter in row 2 updates
+    them. Each reads its question's column of the hidden helper block, so only the
+    students who were allocated the question are counted.
+    """
+    if last_row < 4:
+        return
+
+    allocated_row, wrong_row, wrong_pct_row = last_row + 2, last_row + 3, last_row + 4
+    label_col = first_answer_col - 1
+    for row, label in ((allocated_row, "Allocated"), (wrong_row, "Wrong"), (wrong_pct_row, "Wrong%")):
+        ws.cell(row=row, column=label_col, value=label).font = Font(bold=True)
+
+    for offset, q_no in enumerate(question_nos):
+        col = get_column_letter(first_answer_col + offset)
+        mask = get_column_letter(mask_first_col + offset)
+        answers = f"{col}4:{col}{last_row}"
+        assigned = f"{mask}4:{mask}{last_row}"
+
+        ws[f"{col}{allocated_row}"] = f"=SUM({assigned})"
+        ws[f"{col}{wrong_row}"] = (
+            f"={col}{allocated_row}-SUMPRODUCT(--({answers}={col}$2),{assigned})"
+        )
+        wrong_pct = ws[f"{col}{wrong_pct_row}"]
+        wrong_pct.value = (
+            f"=IF({col}{allocated_row}=0,0,{col}{wrong_row}/{col}{allocated_row})"
+        )
+        wrong_pct.number_format = "0%"
+
+        allocated = allocated_by_q[q_no]
+        wrong = allocated - correct_by_q[q_no]
+        cached_values[f"{col}{allocated_row}"] = allocated
+        cached_values[f"{col}{wrong_row}"] = wrong
+        cached_values[f"{col}{wrong_pct_row}"] = wrong / allocated if allocated else 0
+
+    # Shade Wrong% from white (easiest question) to red (hardest), so the questions
+    # students found hard stand out. Relative to this cohort, and live like the rest.
+    first = get_column_letter(first_answer_col)
+    last = get_column_letter(first_answer_col + len(question_nos) - 1)
+    ws.conditional_formatting.add(
+        f"{first}{wrong_pct_row}:{last}{wrong_pct_row}",
+        ColorScaleRule(
+            start_type="min", start_color="FFFFFFFF", end_type="max", end_color="FFF8696B"
+        ),
+    )
+
+
 def _write_faculty_report(
     writer: pd.ExcelWriter,
     response_df: pd.DataFrame,
     question_bank: FullQuestionBank,
     set_to_question_nos: Dict[str, List[int]],
-) -> Dict[str, int]:
+) -> Dict[str, float]:
     """
     Write the 'Faculty_Report' sheet in the layout the faculty asked for:
 
@@ -480,6 +542,7 @@ def _write_faculty_report(
         row 2        the answer key                          over the answer columns
         row 3        headers, including Count and AnsC
         row 4..      one row per scored submission, ordered by set
+        then         after a blank row, Allocated / Wrong / Wrong% under every question
 
     Count and AnsC are live formulas so that editing the key in row 2 recalculates
     the whole column. Their ranges cover only real question columns — see
@@ -491,7 +554,12 @@ def _write_faculty_report(
     conditional format reads the same block. Without it a formula comparing the row
     to the key has no way to tell an assigned question from an extra one.
 
-    Returns the value each Count/AnsC formula evaluates to, keyed by cell reference, so
+    The three rows under the table read each question's column the other way: of the
+    students who had it on their paper, how many did not get it right. That is the
+    question's perceived difficulty. A blank counts as wrong, as it does on Scores, and
+    answers from students who were not allocated the question are left out.
+
+    Returns the value each formula evaluates to, keyed by cell reference, so
     the caller can write them in as cached results — see `_inject_cached_values`.
     """
     ws = writer.book.create_sheet("Faculty_Report")
@@ -537,7 +605,9 @@ def _write_faculty_report(
     )
 
     # Rows 4+: one per submission.
-    cached_values: Dict[str, int] = {}
+    cached_values: Dict[str, float] = {}
+    allocated_by_q = Counter()
+    correct_by_q = Counter()
     for offset, (_, row) in enumerate(response_df.iterrows()):
         excel_row = 4 + offset
         assigned_qnos = set(
@@ -578,6 +648,9 @@ def _write_faculty_report(
                 count += 1
                 if q_no in assigned_qnos and answer == qno_to_answer[q_no]:
                     ansc += 1
+                    correct_by_q[q_no] += 1
+            if q_no in assigned_qnos:
+                allocated_by_q[q_no] += 1
             ws.cell(
                 row=excel_row,
                 column=mask_first_col + q_offset,
@@ -598,6 +671,17 @@ def _write_faculty_report(
         mask_letter=mask_first_letter,
     )
 
+    _write_question_stats(
+        ws,
+        question_nos,
+        first_answer_col,
+        mask_first_col,
+        last_row=3 + len(response_df),
+        allocated_by_q=allocated_by_q,
+        correct_by_q=correct_by_q,
+        cached_values=cached_values,
+    )
+
     for col in range(mask_first_col - 1, mask_first_col + len(question_nos)):
         ws.column_dimensions[get_column_letter(col)].hidden = True
 
@@ -609,7 +693,7 @@ def _write_faculty_report(
     return cached_values
 
 
-def _inject_cached_values(output_path, sheet_name: str, cached: Dict[str, int]) -> None:
+def _inject_cached_values(output_path, sheet_name: str, cached: Dict[str, float]) -> None:
     """
     Write cached results into formula cells of an already-saved .xlsx.
 
@@ -704,10 +788,9 @@ def generate_scoring_report(
     - Summary
     - Validation
 
-    Additionally includes 'Responses_Review' (colored answer cells) and
-    'Faculty_Report' (the layout the faculty asked for) when question_papers_path
-    and question_bank are provided. Both are built from the submissions that were
-    actually scored, so they never disagree with Scores.
+    Additionally includes 'Faculty_Report' (the layout the faculty asked for) when
+    question_papers_path and question_bank are provided. It is built from the
+    submissions that were actually scored, so it never disagrees with Scores.
 
     `output_path` may be a filesystem path or an in-memory buffer (e.g. io.BytesIO).
     """
@@ -783,7 +866,7 @@ def generate_scoring_report(
         )
 
     response_df = report.scored_df
-    faculty_cached: Dict[str, int] = {}
+    faculty_cached: Dict[str, float] = {}
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         scores_df.to_excel(writer, sheet_name="Scores", index=False)
@@ -802,50 +885,6 @@ def generate_scoring_report(
             faculty_cached = _write_faculty_report(
                 writer, response_df, question_bank, set_to_question_nos
             )
-
-            review_df = response_df.copy()
-            review_df.to_excel(writer, sheet_name="Responses_Review", index=False)
-
-            ws = writer.book["Responses_Review"]
-            green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-            red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-            # Out-of-set answers: attempted, but worth nothing either way.
-            purple_fill = PatternFill(start_color="E4D7F5", end_color="E4D7F5", fill_type="solid")
-            purple_font = Font(bold=True, color="FF7030A0")
-
-            qno_to_answer = {
-                q.question_no: str(q.answer).strip().upper()
-                for q in question_bank.get_all()
-            }
-
-            col_to_idx = {str(col): idx + 1 for idx, col in enumerate(review_df.columns)}
-
-            for row_idx, row in review_df.iterrows():
-                set_no = str(row.get(SET_COL, "")).strip()
-                assigned_qnos = set(set_to_question_nos.get(set_no, []))
-                excel_row = row_idx + 2  # Header is row 1
-
-                for col in review_df.columns:
-                    match = QUESTION_COL_RE.match(str(col))
-                    if not match:
-                        continue
-
-                    q_no = int(match.group(1))
-                    answer = _normalize_answer(row[col])
-                    if answer is None:
-                        continue
-
-                    excel_col = col_to_idx[str(col)]
-                    cell = ws.cell(row=excel_row, column=excel_col)
-
-                    if q_no not in assigned_qnos:
-                        # Not on their paper — never marked, right or wrong.
-                        cell.fill = purple_fill
-                        cell.font = purple_font
-                    elif answer == qno_to_answer.get(q_no):
-                        cell.fill = green_fill
-                    else:
-                        cell.fill = red_fill
 
     # Must run after the writer closes — it rewrites the saved workbook.
     _inject_cached_values(output_path, "Faculty_Report", faculty_cached)

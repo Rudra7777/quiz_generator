@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
@@ -196,21 +197,9 @@ def test_validation_flags_extra_answer_on_unassigned_question(tmp_path: Path):
     assert Path(saved).exists()
 
     xl = pd.ExcelFile(saved)
-    assert "Responses_Review" in xl.sheet_names
-
-    wb = load_workbook(saved)
-    ws = wb["Responses_Review"]
-    has_colored = False
-    for row in ws.iter_rows(min_row=2):
-        for cell in row:
-            if cell.fill and cell.fill.fill_type == "solid":
-                color = (cell.fill.start_color.rgb or "").upper()
-                if color.endswith("C6EFCE") or color.endswith("FFC7CE"):
-                    has_colored = True
-                    break
-        if has_colored:
-            break
-    assert has_colored
+    # Faculty_Report already colour-codes every answer; the separate review sheet is gone.
+    assert "Responses_Review" not in xl.sheet_names
+    assert "Faculty_Report" in xl.sheet_names
 
     validation_df = pd.read_excel(saved, sheet_name="Validation")
     assert "Issue" in validation_df.columns
@@ -248,19 +237,23 @@ def test_summary_has_charts_without_disturbing_the_metrics_table(tmp_path: Path)
     assert chart.x_axis.delete is False
     assert chart.y_axis.delete is False
 
-    # Histogram covers every mark from 0 to max, gaps included, and the bars
-    # must account for every student exactly once.
-    max_marks = max(r.assigned for r in report.student_reports)
+    # Histogram runs from the lowest mark scored to the highest — the empty tails
+    # are left off — and the bars must account for every student exactly once.
+    scored = [r.correct for r in report.student_reports]
+    lowest, highest = min(scored), max(scored)
+    span = highest - lowest + 1
     assert ws["D1"].value == "Marks"
-    marks = [ws.cell(2 + i, 4).value for i in range(max_marks + 1)]
-    assert marks == list(range(max_marks + 1))
+    marks = [ws.cell(2 + i, 4).value for i in range(span)]
+    assert marks == list(range(lowest, highest + 1))
+    assert ws.cell(2 + span, 4).value is None
 
-    bars = [ws.cell(2 + i, 5).value for i in range(max_marks + 1)]
+    bars = [ws.cell(2 + i, 5).value for i in range(span)]
     assert sum(bars) == 30
+    assert bars[0] > 0 and bars[-1] > 0
 
     # The fitted curve should peak at the mark nearest the mean.
-    curve = [ws.cell(2 + i, 6).value for i in range(max_marks + 1)]
-    assert curve.index(max(curve)) == round(report.avg_score)
+    curve = [ws.cell(2 + i, 6).value for i in range(span)]
+    assert marks[curve.index(max(curve))] == round(report.avg_score)
 
 
 def test_out_of_set_answers_are_attempted_but_never_earn_marks(tmp_path: Path):
@@ -341,7 +334,8 @@ def test_faculty_report_layout(tmp_path: Path):
     num_questions = len(question_bank.get_all())
     first_col, last_col = 8, 7 + num_questions
 
-    assert ws.max_row == 3 + 4  # header block + one row per student
+    # Header block, one row per student, a blank row, then the 3 per-question rows.
+    assert ws.max_row == 3 + 4 + 1 + 3
 
     # Row 2 is the full answer key, so no blank-vs-blank pair can inflate AnsC.
     key = [ws.cell(2, c).value for c in range(first_col, last_col + 1)]
@@ -437,9 +431,9 @@ def test_faculty_report_colour_codes_answers_against_the_key(tmp_path: Path):
     last = get_column_letter(7 + num_questions)
     mask = get_column_letter(9 + num_questions)
 
-    ranges = list(ws.conditional_formatting)
+    # The answer cells carry one block of rules; the Wrong% shading below is separate.
+    ranges = [cf for cf in ws.conditional_formatting if str(cf.sqref) == f"H4:{last}7"]
     assert len(ranges) == 1
-    assert str(ranges[0].sqref) == f"H4:{last}7"
 
     styles = {rule.formula[0]: rule.dxf for rule in ranges[0].rules}
 
@@ -462,3 +456,87 @@ def test_faculty_report_colour_codes_answers_against_the_key(tmp_path: Path):
     # Correct/wrong rules key off row 2 — the answer key — so that editing a key
     # letter recolours the column.
     assert all("$2" in f for f in styles if "H4=H$2" in f or "H4<>H$2" in f)
+
+
+def test_faculty_report_rates_each_question_by_the_students_allocated_it(tmp_path: Path):
+    """Under the table: per question, how many had it, and how many got it wrong."""
+    question_bank = load_question_bank(str(QUESTION_BANK))
+    response_df = _responses(8, seed=13)
+
+    # One student answers a question outside their set, correctly. It was not
+    # allocated to them, so it must not move that question's figures.
+    set_map = map_paper_to_bank_questions(str(QUESTION_PAPERS), question_bank)
+    key = {q.question_no: q.answer for q in question_bank.get_all()}
+    extra = min(q for q in key if q not in set_map["S-01"])
+    response_df.loc[0, f"Q{extra}"] = key[extra]
+
+    report = check_all_responses(
+        response_df=response_df,
+        question_papers_path=str(QUESTION_PAPERS),
+        question_bank=question_bank,
+    )
+    saved = generate_scoring_report(
+        report,
+        str(tmp_path / "report.xlsx"),
+        question_papers_path=str(QUESTION_PAPERS),
+        question_bank=question_bank,
+    )
+
+    live = load_workbook(saved)["Faculty_Report"]
+    cached = load_workbook(saved, data_only=True)["Faculty_Report"]
+    num_questions = len(question_bank.get_all())
+    first_col = 8
+    last_student_row = 3 + len(report.student_reports)
+    allocated_row, wrong_row, pct_row = (last_student_row + i for i in (2, 3, 4))
+
+    # A blank row separates the students from the question figures.
+    assert all(live.cell(last_student_row + 1, c).value is None for c in range(1, first_col + 5))
+    assert [live.cell(r, 7).value for r in (allocated_row, wrong_row, pct_row)] == [
+        "Allocated",
+        "Wrong",
+        "Wrong%",
+    ]
+
+    # Expected figures, worked out independently from the scored submissions.
+    for offset in range(num_questions):
+        q_no = offset + 1
+        col = first_col + offset
+        had_it = [
+            r for r in report.student_reports if q_no in set_map[r.set_no]
+        ]
+        answers = report.scored_df.set_index(report.scored_df[SET_COL].astype(str))
+        correct = sum(
+            1 for r in had_it if answers.loc[r.set_no, f"Q{q_no}"] == key[q_no]
+        )
+        allocated, wrong = len(had_it), len(had_it) - correct
+
+        assert cached.cell(allocated_row, col).value == allocated, f"Q{q_no}"
+        assert cached.cell(wrong_row, col).value == wrong, f"Q{q_no}"
+        assert cached.cell(pct_row, col).value == pytest.approx(
+            wrong / allocated if allocated else 0
+        ), f"Q{q_no}"
+
+    # Live formulas, reading the hidden helper block so only allocated students count.
+    letter = get_column_letter(first_col)
+    mask = get_column_letter(first_col + num_questions + 1)
+    rows = f"4:{letter}{last_student_row}"
+    assert live.cell(allocated_row, first_col).value == f"=SUM({mask}4:{mask}{last_student_row})"
+    assert live.cell(wrong_row, first_col).value == (
+        f"={letter}{allocated_row}-SUMPRODUCT(--({letter}{rows}={letter}$2),"
+        f"{mask}4:{mask}{last_student_row})"
+    )
+    assert live.cell(pct_row, first_col).number_format == "0%"
+
+    # Wrong% is shaded white -> red so the hardest questions stand out.
+    last_letter = get_column_letter(first_col + num_questions - 1)
+    scale = [
+        cf for cf in live.conditional_formatting
+        if str(cf.sqref) == f"{letter}{pct_row}:{last_letter}{pct_row}"
+    ]
+    assert len(scale) == 1
+    rule = scale[0].rules[0]
+    assert rule.type == "colorScale"
+    assert [c.rgb for c in rule.colorScale.color] == ["FFFFFFFF", "FFF8696B"]
+
+    # The per-student columns are unchanged: Count and AnsC only.
+    assert [live.cell(3, c).value for c in (6, 7, 8)] == ["Count", "AnsC", "Q-01"]

@@ -224,7 +224,7 @@ def run_check(args):
 
     print(f"\n{'=' * 70}")
     print(f"✅ Scoring complete! Report: {output_path}")
-    print(f"   Sheets: Scores, Summary, Validation, Faculty_Report, Responses_Review")
+    print(f"   Sheets: Scores, Summary, Validation, Faculty_Report")
     print(f"{'=' * 70}")
 
     return True
