@@ -11,17 +11,19 @@ import io
 import math
 import os
 import tempfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import List, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.pagebreak import Break
 from openpyxl.worksheet.page import PageMargins
 from openpyxl.worksheet.properties import PageSetupProperties
 
+from answer_checker import _inject_cached_values
 from excel_handler import load_question_bank, set_label, FullQuestionBank
 
 
@@ -47,6 +49,12 @@ QSET_FONT = Font(bold=True, color="FF0000")
 QSET_FILL = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
 QCD_FILL = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
 CORRECT_OPTION_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+SUMMARY_FILL = PatternFill(start_color="DDEBF7", end_color="DDEBF7", fill_type="solid")
+
+# Question_Bank sheet layout: title on row 1, the filter-aware summary grid from
+# QB_SUMMARY_ROW, and the bank table itself (with its filter buttons) from QB_HEADER_ROW.
+QB_SUMMARY_ROW = 3
+QB_HEADER_ROW = 11
 
 # Per-set sheets are read on screen and kept wide; their visible columns (B hidden)
 # total this many width units. All_Sets prints at the narrower ALL_SETS_WIDTHS.
@@ -197,6 +205,82 @@ def _write_all_sets_sheet(
     ws.page_setup.fitToHeight = 0
     ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
     ws.page_margins = PageMargins(left=0.4, right=0.4, top=0.5, bottom=0.5, header=0.2, footer=0.2)
+
+
+def _write_bank_summary(ws, question_bank: FullQuestionBank, last_bank_row: int) -> dict:
+    """
+    Write a difficulty x correct-option count grid above the Question_Bank table.
+
+    Every count goes through SUBTOTAL(103, ...), which skips rows a filter has
+    hidden, so filtering the bank below (say, to Hard questions, or to one topic)
+    updates the grid to describe just the rows on screen. It sits above the table
+    rather than beside it because a filter hides whole rows, and would hide the
+    grid with them.
+
+    The A-D counts sit in columns C-F, directly over option_a-option_d, and the
+    Total in G, over the answer column. Returns each formula's current value,
+    keyed by cell, for writing in as a cached result.
+    """
+    first, last = QB_HEADER_ROW + 1, last_bank_row
+    visible = f"SUBTOTAL(103,OFFSET($H${first},ROW($H${first}:$H${last})-ROW($H${first}),0))"
+    levels = ["Hard", "Medium", "Easy"]
+    header_row = QB_SUMMARY_ROW + 1
+    total_row = header_row + len(levels) + 1
+    pct_row = total_row + 1
+
+    title = ws.cell(row=QB_SUMMARY_ROW, column=2, value="Summary — counts only the rows the filter shows")
+    title.font = Font(bold=True, italic=True)
+
+    for col, label in enumerate(["Difficulty / Correct option", "A", "B", "C", "D", "Total"], 2):
+        cell = ws.cell(row=header_row, column=col, value=label)
+        cell.font = Font(bold=True)
+        cell.fill = SUMMARY_FILL
+        cell.border = THIN_BORDER
+        cell.alignment = LEFT_ALIGN if col == 2 else CENTER_ALIGN
+
+    by_level = Counter(
+        (q.difficulty.capitalize(), str(q.answer).strip().upper()) for q in question_bank.get_all()
+    )
+    cached = {}
+    for offset, level in enumerate(levels + ["Total", "% of total"]):
+        row = header_row + 1 + offset
+        ws.cell(row=row, column=2, value=level).font = Font(bold=True)
+        for col in range(2, 8):
+            ws.cell(row=row, column=col).border = THIN_BORDER
+        for col_offset, letter in enumerate("ABCD"):
+            col = 3 + col_offset
+            ref = f"{get_column_letter(col)}{row}"
+            col_letter = get_column_letter(col)
+            if level in levels:
+                ws[ref] = (
+                    f"=SUMPRODUCT({visible},--($H${first}:$H${last}=$B{row}),"
+                    f"--($G${first}:$G${last}={col_letter}${header_row}))"
+                )
+                cached[ref] = by_level[(level, letter)]
+            elif level == "Total":
+                ws[ref] = f"=SUM({col_letter}{header_row + 1}:{col_letter}{header_row + len(levels)})"
+                cached[ref] = sum(by_level[(lv, letter)] for lv in levels)
+            else:
+                ws[ref] = f"=IF($G${total_row}=0,0,{col_letter}{total_row}/$G${total_row})"
+                ws[ref].number_format = "0%"
+            ws[ref].alignment = CENTER_ALIGN
+
+        total_ref = f"G{row}"
+        if level == "% of total":
+            ws[total_ref] = f"=SUM(C{row}:F{row})"
+            ws[total_ref].number_format = "0%"
+        else:
+            ws[total_ref] = f"=SUM(C{row}:F{row})"
+            cached[total_ref] = sum(cached[f"{get_column_letter(c)}{row}"] for c in range(3, 7))
+        ws[total_ref].font = Font(bold=True)
+        ws[total_ref].alignment = CENTER_ALIGN
+
+    grand_total = cached[f"G{total_row}"]
+    for col in range(3, 7):
+        share = cached[f"{get_column_letter(col)}{total_row}"] / grand_total if grand_total else 0
+        cached[f"{get_column_letter(col)}{pct_row}"] = share
+    cached[f"G{pct_row}"] = 1 if grand_total else 0
+    return cached
 
 
 def qid_to_number(question_id: str, question_bank: FullQuestionBank) -> int:
@@ -450,13 +534,13 @@ def create_formatted_excel(
                    'option_c', 'option_d', 'answer', 'difficulty']
     qb_fill = PatternFill(start_color="8DB4E2", end_color="8DB4E2", fill_type="solid")
     for col, h in enumerate(qb_headers, 1):
-        cell = ws.cell(row=3, column=col, value=h)
+        cell = ws.cell(row=QB_HEADER_ROW, column=col, value=h)
         cell.font = header_font_white
         cell.fill = qb_fill
         cell.border = thin_border
 
     for q_idx, q in enumerate(question_bank.get_all()):
-        row = q_idx + 4
+        row = QB_HEADER_ROW + 1 + q_idx
         ws.cell(row=row, column=1, value=q.question_no).border = thin_border
         ws.cell(row=row, column=1).alignment = center_align
         ws.cell(row=row, column=2, value=q.question_text).border = thin_border
@@ -481,6 +565,10 @@ def create_formatted_excel(
     ws.column_dimensions['G'].width = 10
     ws.column_dimensions['H'].width = 12
 
+    last_bank_row = QB_HEADER_ROW + len(question_bank.get_all())
+    ws.auto_filter.ref = f"A{QB_HEADER_ROW}:H{last_bank_row}"
+    bank_summary_cached = _write_bank_summary(ws, question_bank, last_bank_row)
+
     # ══════════════════════════════════════════════════════════════════════
     # Combined Print Sheet (every set stacked, A4 portrait)
     # ══════════════════════════════════════════════════════════════════════
@@ -489,6 +577,8 @@ def create_formatted_excel(
     # ── Save ──────────────────────────────────────────────────────────────
     output = io.BytesIO()
     wb.save(output)
+    # Give the summary formulas a result to show before Excel recalculates.
+    _inject_cached_values(output, "Question_Bank", bank_summary_cached)
     output.seek(0)
     return output.getvalue()
 
@@ -524,14 +614,17 @@ def _load_question_bank_from_question_papers(question_papers_path: str) -> FullQ
     temp_path = None
     try:
         try:
-            # Support both formats:
-            # 1) plain table with header on first row
-            # 2) styled sheet with title row and header at row 3 (0-index header=2)
+            # The header row moves between formats — first row on a plain table,
+            # below the title and summary grid on a styled one — so find it first.
+            raw = pd.read_excel(question_papers_path, sheet_name="Question_Bank", header=None)
             question_bank_df = None
-            for header_row in (0, 1, 2, 3, 4):
-                candidate = pd.read_excel(question_papers_path, sheet_name="Question_Bank", header=header_row)
-                candidate = _normalize_cols(candidate)
-                if normalized_required.issubset(set(candidate.columns)):
+            for header_row, values in raw.iterrows():
+                found = {str(v).strip().lower().replace(" ", "_") for v in values if pd.notna(v)}
+                if normalized_required.issubset(found):
+                    candidate = pd.read_excel(
+                        question_papers_path, sheet_name="Question_Bank", header=header_row
+                    )
+                    candidate = _normalize_cols(candidate)
                     question_bank_df = candidate[required_cols].copy()
                     question_bank_df = question_bank_df.dropna(how="all")
                     break

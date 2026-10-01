@@ -75,6 +75,16 @@ Your Excel file should have these columns:
 - `answer`: Correct answer (A/B/C/D)
 - `difficulty`: H/M/L or Hard/Medium/Easy
 
+## Balancing the Answer Key
+
+The **Shuffle Options** page takes a question bank and reorders each question's A–D
+options so the correct answer is A, B, C and D equally often — 25% each — within every
+difficulty level, and so across the whole bank too. Where a level does not divide by four
+(30 questions → 8/8/7/7) the extra answers go to whichever letters the bank is short on.
+Question text, numbering and difficulty are untouched, and every question keeps its
+correct answer, just under a new letter. Download the balanced bank and use it on
+Generate Papers as usual.
+
 ## Output
 
 The generated Excel contains:
@@ -85,7 +95,10 @@ The generated Excel contains:
 - **Allocation_Table**: Original allocation by difficulty
 - **Shuffled_Table**: Randomized order per student
 - **Evaluation**: Usage statistics and metrics
-- **Question_Bank**: The full bank, with each question's correct option highlighted green.
+- **Question_Bank**: The full bank, with each question's correct option highlighted green
+  and filter buttons on its header. Above it, a summary grid counts the correct answers by
+  difficulty (Hard / Medium / Easy) and option (A–D), with totals and each option's share.
+  It counts only the rows the filter shows, so filtering the bank updates it.
   Part 2 reads the bank back out of this sheet.
 
 Optionally upload a case study (PDF or DOCX) on the Generate page. Its text is printed

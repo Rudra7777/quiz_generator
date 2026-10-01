@@ -8,10 +8,19 @@ and one All_Sets sheet holding every set one below another.
 
 import io
 
+import pytest
+
 from openpyxl import load_workbook
 
 from allocator import QuizStructure, allocate_quizzes, shuffle_all_quizzes
-from excel_export import ALL_SETS_SHEET, create_formatted_excel, question_code
+from excel_export import (
+    ALL_SETS_SHEET,
+    QB_HEADER_ROW,
+    QB_SUMMARY_ROW,
+    _load_question_bank_from_question_papers,
+    create_formatted_excel,
+    question_code,
+)
 from excel_handler import SET_LABEL_RE, load_question_bank, set_label
 from response_generator import map_paper_to_bank_questions
 
@@ -176,7 +185,7 @@ def test_question_bank_sheet_highlights_only_the_correct_option():
     ws = load_workbook(io.BytesIO(data))["Question_Bank"]
 
     for offset, q in enumerate(bank.get_all()):
-        row = 4 + offset
+        row = QB_HEADER_ROW + 1 + offset
         filled = [
             letter
             for letter, col in zip('ABCD', range(3, 7))
@@ -258,3 +267,60 @@ def test_no_case_leaves_the_paper_unchanged():
     ws = load_workbook(io.BytesIO(data))[set_label(1)]
 
     assert ws.cell(row=2, column=1).value == 'Sr'
+
+
+def test_question_bank_summary_counts_difficulty_by_correct_option():
+    """The grid above the bank: Hard/Medium/Easy x A-D, totals and shares, cached."""
+    from collections import Counter
+
+    data, _, bank = _papers(2)
+    cached = load_workbook(io.BytesIO(data), data_only=True)["Question_Bank"]
+
+    header = QB_SUMMARY_ROW + 1
+    assert [cached.cell(header, c).value for c in range(3, 8)] == ["A", "B", "C", "D", "Total"]
+
+    expected = Counter((q.difficulty.capitalize(), q.answer) for q in bank.get_all())
+    for offset, level in enumerate(["Hard", "Medium", "Easy"]):
+        row = header + 1 + offset
+        assert cached.cell(row, 2).value == level
+        counts = [cached.cell(row, c).value for c in range(3, 7)]
+        assert counts == [expected[(level, letter)] for letter in "ABCD"]
+        assert cached.cell(row, 7).value == sum(counts)
+
+    total_row, pct_row = header + 4, header + 5
+    totals = [cached.cell(total_row, c).value for c in range(3, 7)]
+    assert totals == [sum(expected[(lv, l)] for lv in ("Hard", "Medium", "Easy")) for l in "ABCD"]
+    assert cached.cell(total_row, 7).value == len(bank.get_all())
+    shares = [cached.cell(pct_row, c).value for c in range(3, 7)]
+    assert shares == pytest.approx([t / len(bank.get_all()) for t in totals])
+    assert cached.cell(pct_row, 3).number_format == "0%"
+
+
+def test_question_bank_summary_follows_the_filter():
+    """Counts go through SUBTOTAL(103, ...) so filtered-out rows drop out of the grid."""
+    data, _, bank = _papers(2)
+    ws = load_workbook(io.BytesIO(data))["Question_Bank"]
+
+    first, last = QB_HEADER_ROW + 1, QB_HEADER_ROW + len(bank.get_all())
+    assert ws.auto_filter.ref == f"A{QB_HEADER_ROW}:H{last}"
+
+    hard_a = ws.cell(QB_SUMMARY_ROW + 2, 3).value
+    assert hard_a == (
+        f"=SUMPRODUCT(SUBTOTAL(103,OFFSET($H${first},ROW($H${first}:$H${last})-ROW($H${first}),0)),"
+        f"--($H${first}:$H${last}=$B{QB_SUMMARY_ROW + 2}),"
+        f"--($G${first}:$G${last}=C${QB_SUMMARY_ROW + 1}))"
+    )
+    # The grid sits above the table, so a filter can never hide it.
+    assert QB_SUMMARY_ROW + 6 < QB_HEADER_ROW
+
+
+def test_part_two_still_reads_the_bank_below_the_summary(tmp_path):
+    data, _, bank = _papers(2)
+    path = tmp_path / "question_papers.xlsx"
+    path.write_bytes(data)
+
+    loaded = _load_question_bank_from_question_papers(str(path))
+
+    assert [(q.question_no, q.answer, q.difficulty) for q in loaded.get_all()] == [
+        (q.question_no, q.answer, q.difficulty) for q in bank.get_all()
+    ]

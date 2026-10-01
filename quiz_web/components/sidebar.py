@@ -42,6 +42,7 @@ def sidebar(active: str) -> rx.Component:
         rx.vstack(
             _nav_item("Generate Papers", "layout-grid", "/", active == "generate"),
             _nav_item("Evaluate Answers", "check-check", "/evaluate", active == "evaluate"),
+            _nav_item("Shuffle Options", "shuffle", "/shuffle", active == "shuffle"),
             spacing="1",
             width="100%",
             padding_top="0.5em",

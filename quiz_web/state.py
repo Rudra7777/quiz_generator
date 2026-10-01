@@ -1,9 +1,10 @@
 """
 Reflex state for the Quiz Generator UI.
 
-Two states mirror the two pages:
+One state per page:
 - GenerateState: upload a question bank and produce randomized question papers.
 - EvaluateState: generate dummy responses, then validate and score submissions.
+- ShuffleState: reorder a bank's options so the key is spread evenly over A-D.
 
 All heavy lifting is delegated to the existing engine modules; raw file bytes are
 held in backend-only vars (leading underscore) so they are never shipped to the client.
@@ -14,12 +15,14 @@ import os
 import secrets
 import tempfile
 
+import pandas as pd
 import reflex as rx
 from openpyxl import load_workbook
 
 from allocator import QuizStructure, allocate_quizzes, shuffle_all_quizzes
 from excel_handler import load_question_bank, SET_LABEL_RE
 from case_reader import read_case_paragraphs
+from option_shuffler import answer_counts, balance_options
 from response_generator import generate_responses
 from answer_checker import (
     load_response_sheet,
@@ -535,3 +538,66 @@ class EvaluateState(rx.State):
             return rx.download(data=report_bytes, filename="scoring_report.xlsx")
         except Exception as exc:  # noqa: BLE001
             self.score_error = f"Scoring failed: {exc}"
+
+
+def _count_rows(counts) -> list[list[str]]:
+    """Difficulty x letter counts as display rows: [level, A, B, C, D, total], plus a Total row."""
+    rows = [
+        [level] + [str(int(n)) for n in counts.loc[level]] + [str(int(counts.loc[level].sum()))]
+        for level in counts.index
+    ]
+    totals = counts.sum()
+    rows.append(["Total"] + [str(int(n)) for n in totals] + [str(int(totals.sum()))])
+    return rows
+
+
+class ShuffleState(rx.State):
+    """Reorder each question's options so the key is spread evenly over A-D."""
+
+    _balanced_bytes: bytes = b""
+
+    bank_uploaded: bool = False
+    bank_filename: str = ""
+    before_rows: list[list[str]] = []
+    after_rows: list[list[str]] = []
+    status: str = ""
+    error: str = ""
+
+    @rx.event
+    async def handle_bank_upload(self, files: list[rx.UploadFile]):
+        self.status = ""
+        self.error = ""
+        self.bank_uploaded = False
+        self._balanced_bytes = b""
+        if not files:
+            return
+        data = await files[0].read()
+        path = _write_temp(data)
+        try:
+            load_question_bank(path)  # same validation, and same messages, as Generate
+            original = pd.read_excel(path)
+            balanced = balance_options(original)
+            self.before_rows = _count_rows(answer_counts(original))
+            self.after_rows = _count_rows(answer_counts(balanced))
+            self._balanced_bytes = _make_excel_bytes_from_dataframe(balanced, "Questions")
+            self.bank_uploaded = True
+            self.bank_filename = files[0].filename or "question_bank.xlsx"
+            self.status = f"Balanced {len(balanced)} questions."
+        except Exception as exc:  # noqa: BLE001 - surface any load error to the user
+            self.bank_filename = ""
+            self.error = f"Could not shuffle: {exc}"
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+    @rx.var
+    def balanced_filename(self) -> str:
+        stem = os.path.splitext(self.bank_filename or "question_bank.xlsx")[0]
+        return f"{stem}_balanced.xlsx"
+
+    @rx.event
+    def download_balanced(self):
+        if not self._balanced_bytes:
+            self.error = "The balanced bank expired. Upload the bank again."
+            return
+        return rx.download(data=self._balanced_bytes, filename=self.balanced_filename)

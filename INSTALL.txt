@@ -80,7 +80,7 @@ get exactly the set this project is known to work on.
 -------------------
     pytest -q
 
-Expected: "30 passed". If you get that, the install is good.
+Expected: "42 passed". If you get that, the install is good.
 
 
 4. RUN IT
