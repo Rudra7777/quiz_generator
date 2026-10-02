@@ -1,4 +1,4 @@
-"""Shuffle Options page — balance a bank's answer key over A-D."""
+"""Shuffle Question Bank page — balance a bank's answer key over A-D."""
 
 import reflex as rx
 
@@ -92,7 +92,7 @@ def shuffle_page() -> rx.Component:
     return shell(
         "shuffle",
         rx.vstack(
-            rx.heading("Shuffle Options", size="7"),
+            rx.heading("Shuffle Question Bank", size="7"),
             rx.text(
                 "Reorder each question's options so the correct answer is A, B, C and D "
                 "equally often within every difficulty level.",

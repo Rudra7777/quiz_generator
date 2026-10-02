@@ -77,7 +77,7 @@ Your Excel file should have these columns:
 
 ## Balancing the Answer Key
 
-The **Shuffle Options** page takes a question bank and reorders each question's A–D
+The **Shuffle Question Bank** page takes a question bank and reorders each question's A–D
 options so the correct answer is A, B, C and D equally often — 25% each — within every
 difficulty level, and so across the whole bank too. Where a level does not divide by four
 (30 questions → 8/8/7/7) the extra answers go to whichever letters the bank is short on.

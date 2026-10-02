@@ -21,4 +21,4 @@ app = rx.App(head_components=[_clear_session_token])
 
 app.add_page(generate_page, route="/", title="Quiz Studio · Generate")
 app.add_page(evaluate_page, route="/evaluate", title="Quiz Studio · Evaluate")
-app.add_page(shuffle_page, route="/shuffle", title="Quiz Studio · Shuffle Options")
+app.add_page(shuffle_page, route="/shuffle", title="Quiz Studio · Shuffle Question Bank")

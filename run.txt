@@ -34,7 +34,7 @@ The student responses file is the Google Forms export, with columns:
     scoring_report.xlsx. To rehearse without real submissions, click "Show dummy
     responses" (hidden by default) and generate a stand-in responses file first.
     Sheets: Scores, Summary, Validation, Faculty_Report
-  - "Shuffle Options" page: upload a bank, download it with each question's options
+  - "Shuffle Question Bank" page: upload a bank, download it with each question's options
     reordered so the correct answer is A/B/C/D 25% of the time within every difficulty.
     Use the balanced file on "Generate Papers".
 
