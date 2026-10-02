@@ -105,8 +105,4 @@ The student responses file is the Google Forms export, with columns:
   A symptom of the same outage: `reflex cloud apps history <app-id>` returns
   HTTP 500 while `apps list`, `apps inspect` and `project list` all work.
 
-  Old app `quiz-web` (https://quiz-web-silver-moon.reflex.run) still exists and
-  serves an older build. Delete it with `reflex cloud apps delete` once the new
-  one is confirmed good.
-
   Free tier: 1 CPU / 1GB RAM, up to 5 deployments.
