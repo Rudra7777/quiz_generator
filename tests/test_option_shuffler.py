@@ -90,3 +90,30 @@ def test_a_bad_answer_letter_is_reported():
 
     with pytest.raises(ValueError, match="row 4"):
         balance_options(bank)
+
+
+def _unmoved(before: pd.DataFrame, after: pd.DataFrame):
+    """(questions whose answer letter is unchanged, option slots holding the same text)."""
+    same_answer = int((before["answer"] == after["answer"]).sum())
+    same_slots = int((before[OPTION_COLS].values == after[OPTION_COLS].values).sum())
+    return same_answer, same_slots
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_on_a_balanced_bank_every_option_moves(seed):
+    original = _bank()
+    balanced = balance_options(original, seed=seed)
+
+    assert _unmoved(original, balanced) == (0, 0)
+    assert _correct_text(balanced) == _correct_text(original)
+
+
+def test_when_one_letter_dominates_only_the_unavoidable_answers_stay_put():
+    # All 'A': a quarter of the key must still be 'A', so those answers cannot move,
+    # but their distractors still do.
+    original = _skewed()
+    balanced = balance_options(original, seed=2)
+
+    same_answer, same_slots = _unmoved(original, balanced)
+    assert same_answer == 18
+    assert same_slots == 18  # just the correct option in those 18 questions

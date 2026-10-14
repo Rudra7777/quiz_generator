@@ -10,6 +10,7 @@ can be saved and fed straight back into Generate Papers.
 """
 
 import random
+from itertools import permutations
 from typing import Optional
 
 import pandas as pd
@@ -37,6 +38,40 @@ def answer_counts(df: pd.DataFrame) -> pd.DataFrame:
     return counts.loc[counts.sum(axis=1) > 0]
 
 
+def _avoid_current_letter(targets: list, current: list, rng: random.Random) -> None:
+    """
+    Swap targets in place until no question keeps its current answer letter.
+
+    A swap with a question whose current and target letters are both different from
+    the clash always exists unless one letter is more than 75% of the level's key;
+    in that case the clashes that cannot be removed are left alone.
+    """
+    for i in range(len(targets)):
+        if targets[i] != current[i]:
+            continue
+        swaps = [
+            j for j in range(len(targets))
+            if targets[j] != current[i] and current[j] != targets[i]
+        ]
+        if swaps:
+            j = rng.choice(swaps)
+            targets[i], targets[j] = targets[j], targets[i]
+
+
+def _new_order(current: int, target: int, rng: random.Random) -> tuple:
+    """
+    Pick a new order for the four options: new_order[slot] is the old slot whose
+    option goes there. The correct option goes from current to target and no other
+    option stays where it was.
+    """
+    orders = [
+        order for order in permutations(range(4))
+        if order[target] == current
+        and all(order[slot] != slot for slot in range(4) if slot != target)
+    ]
+    return rng.choice(orders)
+
+
 def balance_options(df: pd.DataFrame, seed: Optional[int] = None) -> pd.DataFrame:
     """
     Return a copy of the bank with options reordered so the correct answers are
@@ -44,9 +79,9 @@ def balance_options(df: pd.DataFrame, seed: Optional[int] = None) -> pd.DataFram
 
     Each difficulty gets floor(n/4) of every letter; its leftover 1-3 questions go to
     whichever letters the bank has fewest of so far, so the bank as a whole comes out
-    even too. The correct option moves to its new letter and the three distractors
-    are shuffled into the remaining places. Question text, numbers and difficulty are
-    untouched.
+    even too. No question keeps its old answer letter and no distractor stays in its
+    old place, unless one letter makes up more than 75% of a level's key — then a
+    few answers have to stay put. Question text, numbers and difficulty are untouched.
     """
     cols = _column_lookup(df)
     missing = [c for c in OPTION_COLS + ["answer", "difficulty"] if c not in cols]
@@ -75,20 +110,22 @@ def balance_options(df: pd.DataFrame, seed: Optional[int] = None) -> pd.DataFram
             totals[letter] += share
         rng.shuffle(targets)
 
-        for row, target in zip(rows, targets):
-            options = [df.at[row, c] for c in option_cols]
-            current = str(df.at[row, answer_col]).strip().upper()
-            if current not in LETTERS:
+        current = []
+        for row in rows:
+            letter = str(df.at[row, answer_col]).strip().upper()
+            if letter not in LETTERS:
                 raise ValueError(
-                    f"Question at row {row + 2} has answer '{current}', expected A/B/C/D."
+                    f"Question at row {row + 2} has answer '{letter}', expected A/B/C/D."
                 )
-            correct = options[LETTERS.index(current)]
-            distractors = [opt for i, opt in enumerate(options) if i != LETTERS.index(current)]
-            rng.shuffle(distractors)
-            distractors.insert(LETTERS.index(target), correct)
+            current.append(letter)
+        _avoid_current_letter(targets, current, rng)
 
-            for col, value in zip(option_cols, distractors):
-                out.at[row, col] = value
+        for row, letter, target in zip(rows, current, targets):
+            options = [df.at[row, c] for c in option_cols]
+            order = _new_order(LETTERS.index(letter), LETTERS.index(target), rng)
+
+            for col, old_slot in zip(option_cols, order):
+                out.at[row, col] = options[old_slot]
             out.at[row, answer_col] = target
 
     return out
