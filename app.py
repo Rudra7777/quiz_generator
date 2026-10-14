@@ -233,6 +233,7 @@ def _render_generation_tab():
                     shuffled_matrix=shuffled_matrix,
                     usage_counts=usage_counts,
                     question_bank=question_bank,
+                    seed=run_seed,
                 )
 
                 st.session_state["part1_question_papers_bytes"] = excel_bytes
@@ -240,7 +241,7 @@ def _render_generation_tab():
                 st.download_button(
                     label="📥 Download Question Papers (Excel)",
                     data=excel_bytes,
-                    file_name="question_papers.xlsx",
+                    file_name=f"question_papers_seed_{run_seed}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     type="primary",
                     key="part1_download_papers",

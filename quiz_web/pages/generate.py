@@ -235,7 +235,7 @@ def _generate_step() -> rx.Component:
                     ),
                     rx.button(
                         rx.icon("download", size=18),
-                        "Download question_papers.xlsx",
+                        "Download ", GenerateState.papers_filename,
                         on_click=GenerateState.download_papers,
                         variant="soft",
                         size="3",

@@ -53,6 +53,7 @@ def _papers(num_students: int, seed: int = 7, case_paragraphs=()):
         usage_counts=usage_counts,
         question_bank=bank,
         case_paragraphs=case_paragraphs,
+        seed=seed,
     )
     return data, shuffled_matrix, bank
 
@@ -324,3 +325,10 @@ def test_part_two_still_reads_the_bank_below_the_summary(tmp_path):
     assert [(q.question_no, q.answer, q.difficulty) for q in loaded.get_all()] == [
         (q.question_no, q.answer, q.difficulty) for q in bank.get_all()
     ]
+
+
+def test_seed_is_noted_under_the_allocation_table_title():
+    data, _, _ = _papers(num_students=3, seed=1234)
+    ws = load_workbook(io.BytesIO(data))["Allocation_Table"]
+
+    assert ws["A2"].value == "Seed: 1234"

@@ -283,6 +283,7 @@ class GenerateState(rx.State):
                 usage_counts=usage_counts,
                 question_bank=bank,
                 case_paragraphs=self._case_paragraphs,
+                seed=run_seed,
             )
             self.papers_ready = True
             self.last_seed = run_seed
@@ -290,19 +291,23 @@ class GenerateState(rx.State):
             self.status = f"Generated {self.num_students} question papers."
             # Deliver in this same event so the bytes never have to survive a round-trip
             # through the session store — see the note on _build_scoring_report.
-            return rx.download(data=self._papers_bytes, filename="question_papers.xlsx")
+            return rx.download(data=self._papers_bytes, filename=self.papers_filename)
         except Exception as exc:  # noqa: BLE001
             self.error = f"Generation failed: {exc}"
         finally:
             if os.path.exists(path):
                 os.remove(path)
 
+    @rx.var
+    def papers_filename(self) -> str:
+        return f"question_papers_seed_{self.last_seed}.xlsx"
+
     @rx.event
     def download_papers(self):
         if not self._papers_bytes:
             self.error = "The generated papers expired. Generate them again."
             return
-        return rx.download(data=self._papers_bytes, filename="question_papers.xlsx")
+        return rx.download(data=self._papers_bytes, filename=self.papers_filename)
 
 
 class EvaluateState(rx.State):

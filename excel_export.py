@@ -12,7 +12,7 @@ import math
 import os
 import tempfile
 from collections import Counter, defaultdict
-from typing import List, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -301,6 +301,7 @@ def create_formatted_excel(
     question_bank: FullQuestionBank,
     include_answer_key: bool = True,
     case_paragraphs: Sequence[str] = (),
+    seed: Optional[int] = None,
 ) -> bytes:
     """
     Create a formatted Excel file with:
@@ -311,7 +312,8 @@ def create_formatted_excel(
     - Evaluation Table (min/max/delta stats)
 
     `case_paragraphs`, if given (see case_reader), is printed above the questions
-    on every set.
+    on every set. `seed`, if given, is noted under the Allocation Table title so the
+    same papers can be generated again.
     """
     wb = Workbook()
 
@@ -378,6 +380,9 @@ def create_formatted_excel(
     ws['A1'].font = Font(bold=True, size=14)
     num_students = len(allocation_matrix)
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=num_students + 1)
+    if seed is not None:
+        ws['A2'] = f"Seed: {seed}"
+        ws['A2'].font = Font(bold=True)
 
     # Headers
     cell = ws.cell(row=3, column=1, value="Position")
