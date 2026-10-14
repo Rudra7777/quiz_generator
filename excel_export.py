@@ -11,6 +11,7 @@ import io
 import math
 import os
 import tempfile
+import textwrap
 from collections import Counter, defaultdict
 from typing import List, Optional, Sequence, Tuple
 
@@ -30,10 +31,24 @@ from excel_handler import load_question_bank, set_label, FullQuestionBank
 # Sheet holding every set stacked one below another, for A4 portrait printing.
 ALL_SETS_SHEET = "All_Sets"
 
-# Column widths for the stacked print sheet. The visible ones total 92, which is
-# what A4 portrait prints at full size — the per-set sheets stay wide (183) since
-# they are read on screen, not printed.
-ALL_SETS_WIDTHS = {'A': 4, 'B': 8, 'C': 8, 'D': 26, 'E': 13.5, 'F': 13.5, 'G': 13.5, 'H': 13.5}
+# A printed set — on its own sheet or on All_Sets — must fit one A4 portrait page.
+# The visible columns total 92 width units, what A4 portrait prints at full size.
+# Sr and the printed QCd get just enough for '20' and 'Q- 27'; the rest is shared
+# between Question and A-D by how much text each holds (see _plan_set_layout).
+PRINT_WIDTH = 92
+SR_WIDTH = 3
+QCD_WIDTH = 5.5
+HIDDEN_QCD_WIDTH = 6
+TEXT_COLS = 'DEFGH'
+MIN_TEXT_WIDTH = 8
+WIDTH_STEP = 0.5
+
+# Largest font first; a smaller one is used only when a set will not fit at the larger.
+SET_FONT_SIZES = (9, 8)
+# Usable height of an A4 page inside the margins below, in points, with some slack
+# for Excel's row padding.
+PAGE_HEIGHT = 760
+PRINT_MARGINS = PageMargins(left=0.3, right=0.3, top=0.3, bottom=0.3, header=0.1, footer=0.1)
 
 # ── Set block styles ──────────────────────────────────────────────────────────
 THIN_BORDER = Border(
@@ -43,9 +58,9 @@ THIN_BORDER = Border(
 WRAP_ALIGN = Alignment(wrap_text=True, vertical='top')
 CASE_ALIGN = Alignment(wrap_text=True, vertical='top', horizontal='justify')
 CENTER_ALIGN = Alignment(horizontal='center', vertical='center')
+# Sr is only wide enough for a two-digit number, so 'QSet:' above it shrinks to fit.
+SHRINK_ALIGN = Alignment(horizontal='center', vertical='center', shrink_to_fit=True)
 LEFT_ALIGN = Alignment(horizontal='left', vertical='center')
-BOLD_FONT = Font(bold=True)
-QSET_FONT = Font(bold=True, color="FF0000")
 QSET_FILL = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
 QCD_FILL = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
 CORRECT_OPTION_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
@@ -56,16 +71,95 @@ SUMMARY_FILL = PatternFill(start_color="DDEBF7", end_color="DDEBF7", fill_type="
 QB_SUMMARY_ROW = 3
 QB_HEADER_ROW = 11
 
-# Per-set sheets are read on screen and kept wide; their visible columns (B hidden)
-# total this many width units. All_Sets prints at the narrower ALL_SETS_WIDTHS.
-SET_SHEET_WIDTHS = dict(zip('ABCDEFGH', (6, 8, 10, 55, 28, 28, 28, 28)))
-
-# Excel will not auto-fit the height of a merged cell, so case rows are sized by
-# estimate: roughly 1.1 characters of prose per column-width unit, 15pt per line.
-# A row tops out at 409pt, so long paragraphs are split across several rows.
-CASE_CHARS_PER_UNIT = 1.1
-CASE_LINE_HEIGHT = 15
+# Text size estimates, used to plan widths and to size merged case rows (Excel will
+# not auto-fit a merged cell): about 12 characters of 11pt prose per 11 width units,
+# and a line about 1.35 times the font size. Both scale with the font.
+CHARS_PER_UNIT_11PT = 1.1
+LINE_SPACING = 1.35
+ROW_PADDING = 3
+# A row tops out at 409pt, so long case paragraphs are split across several rows.
 CASE_MAX_LINES_PER_ROW = 25
+
+
+def _chars_per_line(width: float, font_size: float) -> int:
+    return max(1, int(width * CHARS_PER_UNIT_11PT * 11 / font_size))
+
+
+def _line_count(text: str, width: float, font_size: float) -> int:
+    """How many lines `text` wraps to in a column `width` units wide."""
+    return max(1, len(textwrap.wrap(str(text), _chars_per_line(width, font_size))))
+
+
+def _row_height(texts: Sequence[str], widths: Sequence[float], font_size: float) -> float:
+    """Estimated height of a row Excel auto-fits to its tallest wrapped cell."""
+    lines = max(_line_count(t, w, font_size) for t, w in zip(texts, widths))
+    return lines * font_size * LINE_SPACING + ROW_PADDING
+
+
+def _question_texts(q) -> List[str]:
+    """What a question row prints in columns D-H."""
+    options = (q.option_a, q.option_b, q.option_c, q.option_d)
+    return [str(q.question_text)] + [f"{letter}] {text}" for letter, text in zip('ABCD', options)]
+
+
+def _text_widths(rows: Sequence[Sequence[str]], font_size: float) -> List[float]:
+    """
+    Share the width left after Sr and QCd between columns D-H so the rows wrap as
+    little as possible: start each at the minimum, then hand out the rest a step at
+    a time to whichever column saves the most total height.
+    """
+    widths = [MIN_TEXT_WIDTH] * len(TEXT_COLS)
+    spare = PRINT_WIDTH - SR_WIDTH - QCD_WIDTH - sum(widths)
+
+    def total(ws):
+        return sum(max(_line_count(t, w, font_size) for t, w in zip(row, ws)) for row in rows)
+
+    current = total(widths)
+    while spare >= WIDTH_STEP:
+        best, best_total = None, None
+        for i in range(len(widths)):
+            trial = widths.copy()
+            trial[i] += WIDTH_STEP
+            t = total(trial)
+            if best_total is None or t < best_total:
+                best, best_total = i, t
+        if best_total == current:
+            # Nothing saves a line any more: share what is left in proportion to text.
+            chars = [sum(len(row[i]) for row in rows) or 1 for i in range(len(widths))]
+            widths = [w + spare * c / sum(chars) for w, c in zip(widths, chars)]
+            break
+        widths[best] += WIDTH_STEP
+        spare -= WIDTH_STEP
+        current = best_total
+    return widths
+
+
+def _plan_set_layout(
+    shuffled_matrix: list, question_bank: FullQuestionBank, case_paragraphs: Sequence[str]
+) -> Tuple[dict, float]:
+    """
+    Pick the column widths and font size every printed set uses: the largest font
+    in SET_FONT_SIZES at which the tallest set fits one page, else the smallest.
+    """
+    used = {qid for quiz in shuffled_matrix for qid in quiz}
+    texts = {qid: _question_texts(question_bank.get_by_id(qid)) for qid in used}
+
+    for font_size in SET_FONT_SIZES:
+        text_widths = _text_widths(list(texts.values()), font_size)
+        widths = {'A': SR_WIDTH, 'B': HIDDEN_QCD_WIDTH, 'C': QCD_WIDTH}
+        widths.update(zip(TEXT_COLS, text_widths))
+
+        fixed = 2 * (font_size * LINE_SPACING + ROW_PADDING)  # QSet line and header
+        fixed += sum(h for _, h in _case_rows(case_paragraphs, _visible_width(widths), font_size))
+        if case_paragraphs:
+            fixed += font_size * LINE_SPACING + ROW_PADDING  # 'Case Study' heading
+        tallest = max(
+            sum(_row_height(texts[qid], text_widths, font_size) for qid in quiz)
+            for quiz in shuffled_matrix
+        )
+        if fixed + tallest <= PAGE_HEIGHT:
+            break
+    return widths, font_size
 
 
 def _visible_width(widths: dict) -> float:
@@ -73,9 +167,11 @@ def _visible_width(widths: dict) -> float:
     return sum(w for ch, w in widths.items() if ch != 'B')
 
 
-def _case_rows(paragraphs: Sequence[str], width: float) -> List[Tuple[str, float]]:
+def _case_rows(
+    paragraphs: Sequence[str], width: float, font_size: float
+) -> List[Tuple[str, float]]:
     """Split case paragraphs into (text, row height) pairs for a block `width` units wide."""
-    chars_per_line = max(1, int(width * CASE_CHARS_PER_UNIT))
+    chars_per_line = _chars_per_line(width, font_size)
     max_chars = chars_per_line * CASE_MAX_LINES_PER_ROW
 
     rows = []
@@ -91,7 +187,7 @@ def _case_rows(paragraphs: Sequence[str], width: float) -> List[Tuple[str, float
             rows.append(chunk)
 
     return [
-        (text, CASE_LINE_HEIGHT * math.ceil(len(text) / chars_per_line) + 4)
+        (text, font_size * LINE_SPACING * math.ceil(len(text) / chars_per_line) + 4)
         for text in rows
     ]
 
@@ -103,6 +199,7 @@ def _write_set_block(
     quiz: list,
     question_bank: FullQuestionBank,
     case_rows: Sequence[Tuple[str, float]] = (),
+    font_size: float = SET_FONT_SIZES[0],
 ) -> int:
     """
     Draw one set's paper starting at `top_row`, returning the row after it.
@@ -113,18 +210,22 @@ def _write_set_block(
     `case_rows`, from `_case_rows`, puts a case study between the QSet line and
     the questions, under a 'Case Study' heading.
     """
+    font = Font(name="Calibri", size=font_size)
+    bold = Font(name="Calibri", size=font_size, bold=True)
+    qset_font = Font(name="Calibri", size=font_size, bold=True, color="FF0000")
+
     # Set label, then blank Name / Roll No fields to fill in by hand
     for col in (1, 2, 3):
         cell = ws.cell(row=top_row, column=col, value="QSet:" if col == 1 else label)
-        cell.font = QSET_FONT
+        cell.font = qset_font
         cell.fill = QSET_FILL
         cell.border = THIN_BORDER
-        cell.alignment = CENTER_ALIGN
+        cell.alignment = SHRINK_ALIGN
 
     ws.merge_cells(start_row=top_row, start_column=4, end_row=top_row, end_column=6)
     ws.merge_cells(start_row=top_row, start_column=7, end_row=top_row, end_column=8)
-    ws.cell(row=top_row, column=4, value="Name:").font = BOLD_FONT
-    ws.cell(row=top_row, column=7, value="Roll No:").font = BOLD_FONT
+    ws.cell(row=top_row, column=4, value="Name:").font = bold
+    ws.cell(row=top_row, column=7, value="Roll No:").font = bold
     for col in range(4, 9):
         ws.cell(row=top_row, column=col).border = THIN_BORDER
         ws.cell(row=top_row, column=col).alignment = LEFT_ALIGN
@@ -133,11 +234,12 @@ def _write_set_block(
     row = top_row + 1
     if case_rows:
         heading = ws.cell(row=row, column=1, value="Case Study")
-        heading.font = BOLD_FONT
+        heading.font = bold
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
         row += 1
         for text, height in case_rows:
             ws.cell(row=row, column=1, value=text).alignment = CASE_ALIGN
+            ws.cell(row=row, column=1).font = font
             ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
             ws.row_dimensions[row].height = height
             row += 1
@@ -147,7 +249,7 @@ def _write_set_block(
     header_row = row
     for col, header in enumerate(['Sr', 'QCd', 'QCd', 'Question', 'A', 'B', 'C', 'D'], 1):
         cell = ws.cell(row=header_row, column=col, value=header)
-        cell.font = BOLD_FONT
+        cell.font = bold
         cell.border = THIN_BORDER
         cell.alignment = CENTER_ALIGN
     ws.cell(row=header_row, column=2).fill = QCD_FILL
@@ -166,6 +268,7 @@ def _write_set_block(
 
         for col in range(1, 9):
             cell = ws.cell(row=row, column=col)
+            cell.font = font
             cell.border = THIN_BORDER
             cell.alignment = CENTER_ALIGN if col <= 3 else WRAP_ALIGN
 
@@ -173,7 +276,12 @@ def _write_set_block(
 
 
 def _write_all_sets_sheet(
-    wb, shuffled_matrix: list, question_bank: FullQuestionBank, case_paragraphs: Sequence[str] = ()
+    wb,
+    shuffled_matrix: list,
+    question_bank: FullQuestionBank,
+    widths: dict,
+    font_size: float,
+    case_rows: Sequence[Tuple[str, float]] = (),
 ) -> None:
     """
     Write every set one below another on a single A4-portrait print sheet.
@@ -183,20 +291,25 @@ def _write_all_sets_sheet(
     Excel fits each row to its own wrapped text.
     """
     ws = wb.create_sheet(title=ALL_SETS_SHEET, index=0)
-    case_rows = _case_rows(case_paragraphs, _visible_width(ALL_SETS_WIDTHS))
 
     row = 1
     for student_idx, quiz in enumerate(shuffled_matrix):
         row = _write_set_block(
-            ws, row, set_label(student_idx + 1), quiz, question_bank, case_rows
+            ws, row, set_label(student_idx + 1), quiz, question_bank, case_rows, font_size
         )
         if student_idx < len(shuffled_matrix) - 1:
             ws.row_breaks.append(Break(id=row - 1))
 
-    for ch, width in ALL_SETS_WIDTHS.items():
+    _set_print_layout(ws, widths)
+
+
+def _set_print_layout(ws, widths: dict) -> None:
+    """Column widths and A4 portrait page setup, one page wide, for a sheet of sets."""
+    for ch, width in widths.items():
         ws.column_dimensions[ch].width = width
-    # Col B carries the bare bank number only so the two sheets stay identical;
-    # faculty print the 'Q- 27' form in Col C, so B is hidden here as well.
+    # Col B carries the bare bank number for the answer-checker to read back
+    # (see response_generator._attach_bank_no); faculty only want to see the
+    # printed 'Q- 27' form in Col C, so hide B from view and from printouts.
     ws.column_dimensions['B'].hidden = True
 
     ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
@@ -204,7 +317,7 @@ def _write_all_sets_sheet(
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
     ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
-    ws.page_margins = PageMargins(left=0.4, right=0.4, top=0.5, bottom=0.5, header=0.2, footer=0.2)
+    ws.page_margins = PRINT_MARGINS
 
 
 def _write_bank_summary(ws, question_bank: FullQuestionBank, last_bank_row: int) -> dict:
@@ -332,21 +445,17 @@ def create_formatted_excel(
     # ══════════════════════════════════════════════════════════════════════
     # Question Paper Sheets (one per student)
     # ══════════════════════════════════════════════════════════════════════
-    case_rows = _case_rows(case_paragraphs, _visible_width(SET_SHEET_WIDTHS))
+    widths, font_size = _plan_set_layout(shuffled_matrix, question_bank, case_paragraphs)
+    case_rows = _case_rows(case_paragraphs, _visible_width(widths), font_size)
     for student_idx, quiz in enumerate(shuffled_matrix):
         label = set_label(student_idx + 1)
         ws = wb.create_sheet(title=label)
-        end_row = _write_set_block(ws, 1, label, quiz, question_bank, case_rows)
-
-        # Column widths & row heights
-        for ch, width in SET_SHEET_WIDTHS.items():
-            ws.column_dimensions[ch].width = width
-        # Col B carries the bare bank number for the answer-checker to read back
-        # (see response_generator._attach_bank_no); faculty only want to see the
-        # printed 'Q- 27' form in Col C, so hide B from view and from printouts.
-        ws.column_dimensions['B'].hidden = True
-        for r in range(end_row - len(quiz), end_row):
-            ws.row_dimensions[r].height = 45
+        _write_set_block(ws, 1, label, quiz, question_bank, case_rows, font_size)
+        _set_print_layout(ws, widths)
+        # On its own sheet a set can be held to one page outright — Excel shrinks it
+        # further if the estimate fell short. All_Sets cannot: fitting to a page
+        # count there would make Excel ignore the breaks between sets.
+        ws.page_setup.fitToHeight = 1
 
     # ══════════════════════════════════════════════════════════════════════
     # Answer Key Sheet
@@ -577,7 +686,7 @@ def create_formatted_excel(
     # ══════════════════════════════════════════════════════════════════════
     # Combined Print Sheet (every set stacked, A4 portrait)
     # ══════════════════════════════════════════════════════════════════════
-    _write_all_sets_sheet(wb, shuffled_matrix, question_bank, case_paragraphs)
+    _write_all_sets_sheet(wb, shuffled_matrix, question_bank, widths, font_size, case_rows)
 
     # ── Save ──────────────────────────────────────────────────────────────
     output = io.BytesIO()

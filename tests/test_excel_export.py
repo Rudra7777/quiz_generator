@@ -131,7 +131,7 @@ def test_all_sets_visible_columns_fit_a4_portrait_width():
     visible = sum(
         ws.column_dimensions[ch].width for ch in 'ACDEFGH'
     )
-    assert visible == 92
+    assert visible == pytest.approx(92)
 
 
 def test_all_sets_starts_each_set_on_a_new_page():
@@ -230,8 +230,8 @@ def test_case_sits_between_the_set_line_and_the_questions_on_every_set():
         for row in range(3, header_row):
             assert 0 < ws.row_dimensions[row].height <= 409  # Excel's row height cap
 
-        # Question rows keep their height below the case.
-        assert ws.row_dimensions[header_row + 1].height == 45
+        # Questions follow the case, their rows left for Excel to fit.
+        assert ws.row_dimensions[header_row + 1].height is None
         assert ws.cell(row=header_row + 1, column=1).value == 1
 
 
@@ -332,3 +332,53 @@ def test_seed_is_noted_under_the_allocation_table_title():
     ws = load_workbook(io.BytesIO(data))["Allocation_Table"]
 
     assert ws["A2"].value == "Seed: 1234"
+
+
+def _papers_of(questions_per_set: int, num_students: int = 6):
+    bank = load_question_bank(str(QUESTION_BANK))
+    hard = questions_per_set // 4
+    medium = (questions_per_set - hard) // 2
+    allocation_matrix, usage_counts = allocate_quizzes(
+        {d: bank.get_question_ids_by_difficulty(d) for d in ("hard", "medium", "easy")},
+        num_students=num_students,
+        quiz_structure=QuizStructure(
+            hard_count=hard, medium_count=medium, easy_count=questions_per_set - hard - medium
+        ),
+        seed=3,
+    )
+    shuffled = shuffle_all_quizzes(allocation_matrix, base_seed=3)
+    return create_formatted_excel(allocation_matrix, shuffled, usage_counts, bank)
+
+
+def test_sr_and_qcd_are_narrow_and_the_text_columns_share_the_rest():
+    ws = load_workbook(io.BytesIO(_papers_of(20)))[ALL_SETS_SHEET]
+    widths = {ch: ws.column_dimensions[ch].width for ch in "ACDEFGH"}
+
+    assert widths["A"] <= 3 and widths["C"] <= 5.5
+    assert all(widths[ch] >= 8 for ch in "DEFGH")
+
+
+def test_a_twenty_question_set_is_planned_onto_one_page_at_8_or_9pt():
+    from excel_export import PAGE_HEIGHT, _question_texts, _row_height
+
+    bank = load_question_bank(str(QUESTION_BANK))
+    wb = load_workbook(io.BytesIO(_papers_of(20)))
+    ws = wb[set_label(1)]
+    font_size = ws.cell(row=3, column=4).font.sz
+
+    assert font_size in (8, 9)
+    assert ws.page_setup.fitToHeight == 1  # its own sheet is held to one page
+    widths = [ws.column_dimensions[ch].width for ch in "DEFGH"]
+    by_no = {q.question_no: q for q in bank.get_all()}
+    texts = [
+        _question_texts(by_no[ws.cell(row=r, column=2).value])
+        for r in range(3, ws.max_row + 1)
+    ]
+    height = sum(_row_height(t, widths, font_size) for t in texts)
+    assert height <= PAGE_HEIGHT
+
+
+def test_short_sets_keep_the_larger_font():
+    ws = load_workbook(io.BytesIO(_papers_of(10)))[set_label(1)]
+
+    assert ws.cell(row=3, column=4).font.sz == 9
