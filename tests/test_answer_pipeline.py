@@ -458,17 +458,21 @@ def test_faculty_report_colour_codes_answers_against_the_key(tmp_path: Path):
     assert all("$2" in f for f in styles if "H4=H$2" in f or "H4<>H$2" in f)
 
 
-def test_faculty_report_rates_each_question_by_the_students_allocated_it(tmp_path: Path):
-    """Under the table: per question, how many had it, and how many got it wrong."""
+def test_faculty_report_rates_each_question_by_the_students_who_answered_it(tmp_path: Path):
+    """Under the table: per question, how many answered it, and how many got it wrong."""
     question_bank = load_question_bank(str(QUESTION_BANK))
     response_df = _responses(8, seed=13)
 
-    # One student answers a question outside their set, correctly. It was not
-    # allocated to them, so it must not move that question's figures.
     set_map = map_paper_to_bank_questions(str(QUESTION_PAPERS), question_bank)
     key = {q.question_no: q.answer for q in question_bank.get_all()}
+
+    # One student answers a question outside their set, correctly. It still counts
+    # towards that question's figures — every answer given says something about it.
     extra = min(q for q in key if q not in set_map["S-01"])
     response_df.loc[0, f"Q{extra}"] = key[extra]
+    # Another leaves one of their own questions blank. Unanswered, so it is left out.
+    skipped = set_map["S-02"][0]
+    response_df.loc[1, f"Q{skipped}"] = None
 
     report = check_all_responses(
         response_df=response_df,
@@ -487,12 +491,12 @@ def test_faculty_report_rates_each_question_by_the_students_allocated_it(tmp_pat
     num_questions = len(question_bank.get_all())
     first_col = 8
     last_student_row = 3 + len(report.student_reports)
-    allocated_row, wrong_row, pct_row = (last_student_row + i for i in (2, 3, 4))
+    answered_row, wrong_row, pct_row = (last_student_row + i for i in (2, 3, 4))
 
     # A blank row separates the students from the question figures.
     assert all(live.cell(last_student_row + 1, c).value is None for c in range(1, first_col + 5))
-    assert [live.cell(r, 7).value for r in (allocated_row, wrong_row, pct_row)] == [
-        "Allocated",
+    assert [live.cell(r, 7).value for r in (answered_row, wrong_row, pct_row)] == [
+        "Answered",
         "Wrong",
         "Wrong%",
     ]
@@ -501,29 +505,32 @@ def test_faculty_report_rates_each_question_by_the_students_allocated_it(tmp_pat
     for offset in range(num_questions):
         q_no = offset + 1
         col = first_col + offset
-        had_it = [
-            r for r in report.student_reports if q_no in set_map[r.set_no]
+        given = [
+            a for a in report.scored_df[f"Q{q_no}"]
+            if pd.notna(a) and str(a).strip()
         ]
-        answers = report.scored_df.set_index(report.scored_df[SET_COL].astype(str))
-        correct = sum(
-            1 for r in had_it if answers.loc[r.set_no, f"Q{q_no}"] == key[q_no]
-        )
-        allocated, wrong = len(had_it), len(had_it) - correct
+        answered = len(given)
+        wrong = sum(1 for a in given if str(a).strip().upper() != key[q_no])
 
-        assert cached.cell(allocated_row, col).value == allocated, f"Q{q_no}"
+        assert cached.cell(answered_row, col).value == answered, f"Q{q_no}"
         assert cached.cell(wrong_row, col).value == wrong, f"Q{q_no}"
         assert cached.cell(pct_row, col).value == pytest.approx(
-            wrong / allocated if allocated else 0
+            wrong / answered if answered else 0
         ), f"Q{q_no}"
 
-    # Live formulas, reading the hidden helper block so only allocated students count.
+    assert cached.cell(answered_row, first_col + extra - 1).value == (
+        sum(1 for r in report.student_reports if extra in set_map[r.set_no]) + 1
+    )
+    assert cached.cell(answered_row, first_col + skipped - 1).value == (
+        sum(1 for r in report.student_reports if skipped in set_map[r.set_no]) - 1
+    )
+
+    # Live formulas over the answer column, so editing the key in row 2 updates them.
     letter = get_column_letter(first_col)
-    mask = get_column_letter(first_col + num_questions + 1)
-    rows = f"4:{letter}{last_student_row}"
-    assert live.cell(allocated_row, first_col).value == f"=SUM({mask}4:{mask}{last_student_row})"
+    answers = f"{letter}4:{letter}{last_student_row}"
+    assert live.cell(answered_row, first_col).value == f"=COUNTA({answers})"
     assert live.cell(wrong_row, first_col).value == (
-        f"={letter}{allocated_row}-SUMPRODUCT(--({letter}{rows}={letter}$2),"
-        f"{mask}4:{mask}{last_student_row})"
+        f"={letter}{answered_row}-COUNTIF({answers},{letter}$2)"
     )
     assert live.cell(pct_row, first_col).number_format == "0%"
 

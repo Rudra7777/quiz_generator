@@ -140,10 +140,10 @@ dropped ones are listed on the `Validation` sheet.
 - **Validation**: duplicate submissions, and anyone who answered outside their set
 - **Faculty_Report**: the layout the faculty asked for — answer key strip on rows 1–2, then
   one row per student with live `Count` and `AnsC` formulas (see `docs/adr/0002`).
-  Under the table, three rows rate every question by its perceived difficulty: `Allocated`
-  (how many students had it on their paper), `Wrong` (how many of them did not get it
-  right — a blank counts as wrong) and `Wrong%`, shaded white to red so the hardest
-  questions stand out. Students who answered it without being allocated it are left out.
+  Under the table, three rows rate every question by its perceived difficulty: `Answered`
+  (how many students filled it in — blanks are left out, answers from outside a
+  student's set count), `Wrong` (how many of those answers were wrong) and `Wrong%`,
+  shaded white to red so the hardest questions stand out.
   Answers are colour-coded on two axes: the text says right or wrong against the key
   (**blue** / ***red italic***), the background says whose question it was — light green
   across the whole of the student's own set, answered or not, so the ones they skipped

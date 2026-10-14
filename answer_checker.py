@@ -473,49 +473,44 @@ def _write_question_stats(
     ws,
     question_nos: List[int],
     first_answer_col: int,
-    mask_first_col: int,
     last_row: int,
-    allocated_by_q: Counter,
+    answered_by_q: Counter,
     correct_by_q: Counter,
     cached_values: Dict[str, float],
 ) -> None:
     """
-    Write Allocated / Wrong / Wrong% under every question column of Faculty_Report,
+    Write Answered / Wrong / Wrong% under every question column of Faculty_Report,
     one blank row below the last student.
 
     Live formulas like Count and AnsC, so correcting a key letter in row 2 updates
-    them. Each reads its question's column of the hidden helper block, so only the
-    students who were allocated the question are counted.
+    them. Only answers actually given count — a blank says nothing about the
+    question — and that includes answers from students it was not allocated to.
     """
     if last_row < 4:
         return
 
-    allocated_row, wrong_row, wrong_pct_row = last_row + 2, last_row + 3, last_row + 4
+    answered_row, wrong_row, wrong_pct_row = last_row + 2, last_row + 3, last_row + 4
     label_col = first_answer_col - 1
-    for row, label in ((allocated_row, "Allocated"), (wrong_row, "Wrong"), (wrong_pct_row, "Wrong%")):
+    for row, label in ((answered_row, "Answered"), (wrong_row, "Wrong"), (wrong_pct_row, "Wrong%")):
         ws.cell(row=row, column=label_col, value=label).font = Font(bold=True)
 
     for offset, q_no in enumerate(question_nos):
         col = get_column_letter(first_answer_col + offset)
-        mask = get_column_letter(mask_first_col + offset)
         answers = f"{col}4:{col}{last_row}"
-        assigned = f"{mask}4:{mask}{last_row}"
 
-        ws[f"{col}{allocated_row}"] = f"=SUM({assigned})"
-        ws[f"{col}{wrong_row}"] = (
-            f"={col}{allocated_row}-SUMPRODUCT(--({answers}={col}$2),{assigned})"
-        )
+        ws[f"{col}{answered_row}"] = f"=COUNTA({answers})"
+        ws[f"{col}{wrong_row}"] = f"={col}{answered_row}-COUNTIF({answers},{col}$2)"
         wrong_pct = ws[f"{col}{wrong_pct_row}"]
         wrong_pct.value = (
-            f"=IF({col}{allocated_row}=0,0,{col}{wrong_row}/{col}{allocated_row})"
+            f"=IF({col}{answered_row}=0,0,{col}{wrong_row}/{col}{answered_row})"
         )
         wrong_pct.number_format = "0%"
 
-        allocated = allocated_by_q[q_no]
-        wrong = allocated - correct_by_q[q_no]
-        cached_values[f"{col}{allocated_row}"] = allocated
+        answered = answered_by_q[q_no]
+        wrong = answered - correct_by_q[q_no]
+        cached_values[f"{col}{answered_row}"] = answered
         cached_values[f"{col}{wrong_row}"] = wrong
-        cached_values[f"{col}{wrong_pct_row}"] = wrong / allocated if allocated else 0
+        cached_values[f"{col}{wrong_pct_row}"] = wrong / answered if answered else 0
 
     # Shade Wrong% from white (easiest question) to red (hardest), so the questions
     # students found hard stand out. Relative to this cohort, and live like the rest.
@@ -542,7 +537,7 @@ def _write_faculty_report(
         row 2        the answer key                          over the answer columns
         row 3        headers, including Count and AnsC
         row 4..      one row per scored submission, ordered by set
-        then         after a blank row, Allocated / Wrong / Wrong% under every question
+        then         after a blank row, Answered / Wrong / Wrong% under every question
 
     Count and AnsC are live formulas so that editing the key in row 2 recalculates
     the whole column. Their ranges cover only real question columns — see
@@ -555,9 +550,9 @@ def _write_faculty_report(
     to the key has no way to tell an assigned question from an extra one.
 
     The three rows under the table read each question's column the other way: of the
-    students who had it on their paper, how many did not get it right. That is the
-    question's perceived difficulty. A blank counts as wrong, as it does on Scores, and
-    answers from students who were not allocated the question are left out.
+    students who answered it, how many got it wrong. That is the question's perceived
+    difficulty. Blanks are left out, and answers from students who were not allocated
+    the question count, since they say just as much about it.
 
     Returns the value each formula evaluates to, keyed by cell reference, so
     the caller can write them in as cached results — see `_inject_cached_values`.
@@ -606,7 +601,7 @@ def _write_faculty_report(
 
     # Rows 4+: one per submission.
     cached_values: Dict[str, float] = {}
-    allocated_by_q = Counter()
+    answered_by_q = Counter()
     correct_by_q = Counter()
     for offset, (_, row) in enumerate(response_df.iterrows()):
         excel_row = 4 + offset
@@ -646,11 +641,11 @@ def _write_faculty_report(
             if answer is not None:
                 ws.cell(row=excel_row, column=first_answer_col + q_offset, value=answer)
                 count += 1
-                if q_no in assigned_qnos and answer == qno_to_answer[q_no]:
-                    ansc += 1
+                answered_by_q[q_no] += 1
+                if answer == qno_to_answer[q_no]:
                     correct_by_q[q_no] += 1
-            if q_no in assigned_qnos:
-                allocated_by_q[q_no] += 1
+                    if q_no in assigned_qnos:
+                        ansc += 1
             ws.cell(
                 row=excel_row,
                 column=mask_first_col + q_offset,
@@ -675,9 +670,8 @@ def _write_faculty_report(
         ws,
         question_nos,
         first_answer_col,
-        mask_first_col,
         last_row=3 + len(response_df),
-        allocated_by_q=allocated_by_q,
+        answered_by_q=answered_by_q,
         correct_by_q=correct_by_q,
         cached_values=cached_values,
     )
