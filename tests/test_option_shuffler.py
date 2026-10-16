@@ -117,3 +117,28 @@ def test_when_one_letter_dominates_only_the_unavoidable_answers_stay_put():
     same_answer, same_slots = _unmoved(original, balanced)
     assert same_answer == 18
     assert same_slots == 18  # just the correct option in those 18 questions
+
+
+def test_shuffle_check_counts_every_question_as_moved_on_a_balanced_bank():
+    from option_shuffler import shuffle_check
+
+    original = _bank()
+    check = shuffle_check(original, balance_options(original, seed=4))
+
+    assert check == {
+        "total": len(original),
+        "answer_moved": len(original),
+        "all_moved": len(original),
+        "not_moved": [],
+    }
+
+
+def test_shuffle_check_names_the_questions_that_could_not_move():
+    from option_shuffler import shuffle_check
+
+    original = _skewed()
+    check = shuffle_check(original, balance_options(original, seed=2))
+
+    assert check["answer_moved"] == check["all_moved"] == 72 - 18
+    assert len(check["not_moved"]) == 18
+    assert set(check["not_moved"]) <= set(original["question_no"])

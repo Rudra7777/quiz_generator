@@ -22,7 +22,7 @@ from openpyxl import load_workbook
 from allocator import QuizStructure, allocate_quizzes, shuffle_all_quizzes
 from excel_handler import load_question_bank, SET_LABEL_RE
 from case_reader import read_case_paragraphs
-from option_shuffler import answer_counts, balance_options
+from option_shuffler import answer_counts, balance_options, shuffle_check
 from response_generator import generate_responses
 from answer_checker import (
     load_response_sheet,
@@ -565,6 +565,9 @@ class ShuffleState(rx.State):
     bank_filename: str = ""
     before_rows: list[list[str]] = []
     after_rows: list[list[str]] = []
+    check_rows: list[list[str]] = []
+    check_message: str = ""
+    all_moved: bool = False
     status: str = ""
     error: str = ""
 
@@ -584,6 +587,25 @@ class ShuffleState(rx.State):
             balanced = balance_options(original)
             self.before_rows = _count_rows(answer_counts(original))
             self.after_rows = _count_rows(answer_counts(balanced))
+            check = shuffle_check(original, balanced)
+            total = check["total"]
+            self.check_rows = [
+                ["Answer letter changed", f"{check['answer_moved']} of {total}"],
+                ["All four options in a new place", f"{check['all_moved']} of {total}"],
+            ]
+            self.all_moved = check["all_moved"] == total
+            if self.all_moved:
+                self.check_message = (
+                    f"All {total} questions shuffled: every answer letter changed and "
+                    "no option is where it was."
+                )
+            else:
+                numbers = ", ".join(f"Q{n}" for n in check["not_moved"])
+                self.check_message = (
+                    f"{len(check['not_moved'])} questions kept their answer letter: {numbers}. "
+                    "One letter is the answer to more than 75% of a difficulty level, so "
+                    "some of those have to stay on it for the key to come out even."
+                )
             self._balanced_bytes = _make_excel_bytes_from_dataframe(balanced, "Questions")
             self.bank_uploaded = True
             self.bank_filename = files[0].filename or "question_bank.xlsx"

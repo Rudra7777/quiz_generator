@@ -129,3 +129,29 @@ def balance_options(df: pd.DataFrame, seed: Optional[int] = None) -> pd.DataFram
             out.at[row, answer_col] = target
 
     return out
+
+
+def shuffle_check(original: pd.DataFrame, balanced: pd.DataFrame) -> dict:
+    """
+    Compare a bank with its balanced copy, question by question: how many changed
+    their answer letter, how many have all four options in new places, and the
+    question numbers of any that did not fully move.
+    """
+    cols = _column_lookup(original)
+    option_cols = [cols[c] for c in OPTION_COLS]
+    answer_col = cols["answer"]
+
+    same_answer = (
+        original[answer_col].astype(str).str.strip().str.upper()
+        == balanced[answer_col].astype(str).str.strip().str.upper()
+    )
+    unmoved_option = (original[option_cols].values == balanced[option_cols].values).any(axis=1)
+    not_moved = original.index[unmoved_option | same_answer.values]
+
+    numbers = original[cols["question_no"]]
+    return {
+        "total": len(original),
+        "answer_moved": int((~same_answer).sum()),
+        "all_moved": int(len(original) - len(not_moved)),
+        "not_moved": [int(n) for n in numbers.loc[not_moved]],
+    }

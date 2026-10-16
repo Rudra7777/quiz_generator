@@ -34,6 +34,34 @@ def _count_table(title: str, rows) -> rx.Component:
     )
 
 
+def _check_table() -> rx.Component:
+    """Proof the shuffle moved every question: compared with the uploaded bank."""
+    return rx.vstack(
+        rx.text("Shuffle check", size="2", weight="bold"),
+        rx.table.root(
+            rx.table.body(
+                rx.foreach(
+                    ShuffleState.check_rows,
+                    lambda row: rx.table.row(
+                        rx.table.cell(row[0]),
+                        rx.table.cell(row[1], text_align="right"),
+                    ),
+                ),
+            ),
+            variant="surface",
+            size="1",
+            width="100%",
+        ),
+        rx.cond(
+            ShuffleState.all_moved,
+            feedback(ShuffleState.check_message, "grass", "circle_check"),
+            feedback(ShuffleState.check_message, "amber", "triangle_alert"),
+        ),
+        spacing="2",
+        width="100%",
+    )
+
+
 def _upload_step() -> rx.Component:
     return section(
         "1",
@@ -72,6 +100,7 @@ def _result_step() -> rx.Component:
                     width="100%",
                     align="start",
                 ),
+                _check_table(),
                 rx.button(
                     rx.icon("download", size=18),
                     "Download ", ShuffleState.balanced_filename,
