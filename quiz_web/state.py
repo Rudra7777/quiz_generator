@@ -22,7 +22,7 @@ from openpyxl import load_workbook
 from allocator import QuizStructure, allocate_quizzes, shuffle_all_quizzes
 from excel_handler import load_question_bank, SET_LABEL_RE
 from case_reader import read_case_paragraphs
-from option_shuffler import answer_counts, balance_options, shuffle_check
+from option_shuffler import answer_counts, balance_options, balanced_bank_bytes, shuffle_check
 from response_generator import generate_responses
 from answer_checker import (
     load_response_sheet,
@@ -606,7 +606,7 @@ class ShuffleState(rx.State):
                     "One letter is the answer to more than 75% of a difficulty level, so "
                     "some of those have to stay on it for the key to come out even."
                 )
-            self._balanced_bytes = _make_excel_bytes_from_dataframe(balanced, "Questions")
+            self._balanced_bytes = balanced_bank_bytes(original, balanced)
             self.bank_uploaded = True
             self.bank_filename = files[0].filename or "question_bank.xlsx"
             self.status = f"Balanced {len(balanced)} questions."

@@ -142,3 +142,70 @@ def test_shuffle_check_names_the_questions_that_could_not_move():
     assert check["answer_moved"] == check["all_moved"] == 72 - 18
     assert len(check["not_moved"]) == 18
     assert set(check["not_moved"]) <= set(original["question_no"])
+
+
+def _workbook(original, balanced):
+    import io
+    from openpyxl import load_workbook
+    from option_shuffler import balanced_bank_bytes
+
+    return load_workbook(io.BytesIO(balanced_bank_bytes(original, balanced)))
+
+
+def test_download_holds_shuffled_original_and_comparison_with_shuffled_first(tmp_path):
+    from excel_handler import load_question_bank
+    from option_shuffler import balanced_bank_bytes
+
+    original = _bank()
+    balanced = balance_options(original, seed=6)
+    data = balanced_bank_bytes(original, balanced)
+    path = tmp_path / "balanced.xlsx"
+    path.write_bytes(data)
+
+    wb = _workbook(original, balanced)
+    assert wb.sheetnames == ["Shuffled", "Original", "Comparison"]
+    pd.testing.assert_frame_equal(pd.read_excel(path, sheet_name="Shuffled"), balanced)
+    pd.testing.assert_frame_equal(pd.read_excel(path, sheet_name="Original"), original)
+    # Generate Papers reads the first sheet, so it must get the shuffled bank.
+    bank = load_question_bank(str(path))
+    assert [q.answer for q in bank.get_all()] == list(balanced["answer"])
+
+
+def test_comparison_puts_old_over_new_for_every_question():
+    original = _bank()
+    balanced = balance_options(original, seed=6)
+    ws = _workbook(original, balanced)["Comparison"]
+
+    assert [c.value for c in ws[1]] == [
+        "Q.No", "Question", "Row", "A", "B", "C", "D", "Ans", "Moved"
+    ]
+    for i in range(len(original)):
+        old, new = 2 + 2 * i, 3 + 2 * i
+        assert ws.cell(old, 1).value == original.loc[i, "question_no"]
+        assert ws.cell(old, 3).value == "Old" and ws.cell(new, 3).value == "New"
+        assert [ws.cell(old, c).value for c in range(4, 8)] == list(original.loc[i, OPTION_COLS])
+        assert [ws.cell(new, c).value for c in range(4, 8)] == list(balanced.loc[i, OPTION_COLS])
+        assert ws.cell(old, 8).value == original.loc[i, "answer"]
+        assert ws.cell(new, 8).value == balanced.loc[i, "answer"]
+        assert ws.cell(new, 9).value == "YES"
+        # Every new option sits somewhere new, so every new cell is green.
+        assert all(ws.cell(new, c).fill.start_color.rgb.endswith("C6EFCE") for c in range(4, 8))
+        # The correct option is bold in both rows.
+        old_letter, new_letter = original.loc[i, "answer"], balanced.loc[i, "answer"]
+        assert ws.cell(old, 4 + "ABCD".index(old_letter)).font.b
+        assert ws.cell(new, 4 + "ABCD".index(new_letter)).font.b
+
+
+def test_comparison_marks_an_option_that_stayed_put_in_red():
+    original = _skewed()
+    balanced = balance_options(original, seed=2)
+    ws = _workbook(original, balanced)["Comparison"]
+
+    stayed = [
+        i for i in range(len(original)) if original.loc[i, "answer"] == balanced.loc[i, "answer"]
+    ]
+    assert len(stayed) == 18
+    for i in stayed:
+        new = 3 + 2 * i
+        assert ws.cell(new, 9).value == "NO"
+        assert ws.cell(new, 4).fill.start_color.rgb.endswith("FFC7CE")  # 'A' never moved

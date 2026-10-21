@@ -9,17 +9,23 @@ Works on the bank as a DataFrame in the question bank file format, so the result
 can be saved and fed straight back into Generate Papers.
 """
 
+import io
 import random
 from itertools import permutations
 from typing import Optional
 
 import pandas as pd
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from excel_handler import normalize_difficulty
 
 
 LETTERS = "ABCD"
 OPTION_COLS = ["option_a", "option_b", "option_c", "option_d"]
+
+MOVED_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+STAYED_FILL = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+THIN = Side(style="thin")
 
 
 def _column_lookup(df: pd.DataFrame) -> dict:
@@ -155,3 +161,83 @@ def shuffle_check(original: pd.DataFrame, balanced: pd.DataFrame) -> dict:
         "all_moved": int(len(original) - len(not_moved)),
         "not_moved": [int(n) for n in numbers.loc[not_moved]],
     }
+
+
+def balanced_bank_bytes(original: pd.DataFrame, balanced: pd.DataFrame) -> bytes:
+    """
+    The balanced bank as an Excel file with three sheets:
+
+        Shuffled     the balanced bank — first, because Generate Papers reads the
+                     first sheet, so this file can be uploaded there as it is
+        Original     the bank as uploaded
+        Comparison   each question's old options over its new ones, so every
+                     option can be checked by eye
+    """
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        balanced.to_excel(writer, sheet_name="Shuffled", index=False)
+        original.to_excel(writer, sheet_name="Original", index=False)
+        _write_comparison(writer.book.create_sheet("Comparison"), original, balanced)
+    return output.getvalue()
+
+
+def _write_comparison(ws, original: pd.DataFrame, balanced: pd.DataFrame) -> None:
+    """
+    Two rows per question: the old options, then the new ones under them. A new
+    option is green where it differs from the old one in that column and red where
+    it is the same; the correct option is bold in both rows. Moved says YES only when
+    the answer letter changed and all four options are in new places.
+    """
+    cols = _column_lookup(original)
+    option_cols = [cols[c] for c in OPTION_COLS]
+    answer_col = cols["answer"]
+
+    headers = ["Q.No", "Question", "Row", "A", "B", "C", "D", "Ans", "Moved"]
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.font = Font(name="Calibri", bold=True)
+        cell.alignment = Alignment(horizontal="center")
+
+    wrap = Alignment(wrap_text=True, vertical="top")
+    center = Alignment(horizontal="center", vertical="top")
+    for i, (idx, old) in enumerate(original.iterrows()):
+        new = balanced.loc[idx]
+        old_row, new_row = 2 + 2 * i, 3 + 2 * i
+        old_answer = str(old[answer_col]).strip().upper()
+        new_answer = str(new[answer_col]).strip().upper()
+        same = [old[c] == new[c] for c in option_cols]
+        moved = old_answer != new_answer and not any(same)
+
+        ws.cell(old_row, 1, old[cols["question_no"]]).alignment = center
+        ws.cell(old_row, 2, old[cols["question"]]).alignment = wrap
+        ws.merge_cells(start_row=old_row, start_column=1, end_row=new_row, end_column=1)
+        ws.merge_cells(start_row=old_row, start_column=2, end_row=new_row, end_column=2)
+
+        for row, values, answer in ((old_row, old, old_answer), (new_row, new, new_answer)):
+            ws.cell(row, 3, "Old" if row == old_row else "New").alignment = center
+            for offset, col in enumerate(option_cols):
+                cell = ws.cell(row, 4 + offset, values[col])
+                cell.alignment = wrap
+                cell.font = Font(name="Calibri", bold=LETTERS[offset] == answer)
+                if row == new_row:
+                    cell.fill = STAYED_FILL if same[offset] else MOVED_FILL
+            ws.cell(row, 8, answer).alignment = center
+
+        flag = ws.cell(new_row, 9, "YES" if moved else "NO")
+        flag.alignment = center
+        flag.font = Font(name="Calibri", bold=True)
+        flag.fill = MOVED_FILL if moved else STAYED_FILL
+        ws.cell(new_row, 8).fill = STAYED_FILL if old_answer == new_answer else MOVED_FILL
+
+        # One box round each question's pair of rows.
+        for row in (old_row, new_row):
+            for col in range(1, len(headers) + 1):
+                ws.cell(row, col).border = Border(
+                    left=THIN, right=THIN,
+                    top=THIN if row == old_row else None,
+                    bottom=THIN if row == new_row else None,
+                )
+
+    for letter, width in zip("ABCDEFGHI", (6, 40, 6, 28, 28, 28, 28, 6, 8)):
+        ws.column_dimensions[letter].width = width
+    ws.freeze_panes = "D2"
