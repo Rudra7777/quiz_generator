@@ -26,6 +26,7 @@ from openpyxl.utils import get_column_letter
 from excel_handler import FullQuestionBank, parse_set_label
 from response_generator import (
     ANSWER_COL_RE,
+    answer_column,
     EMAIL_COL,
     IDENTITY_COLS,
     NAME_COL,
@@ -33,7 +34,10 @@ from response_generator import (
     SET_COL,
     TIMESTAMP_COL,
     map_paper_to_bank_questions,
+    to_bank_columns,
+    to_positional_columns,
 )
+from same_questions import SetMap, read_set_map
 
 
 VALID_OPTIONS = {"A", "B", "C", "D"}
@@ -42,6 +46,15 @@ QUESTION_COL_RE = re.compile(r"^Q(\d+)$")
 # Columns the response sheet cannot be scored without: the join key to the answer
 # key, plus what the "latest submission wins" rule needs to pick a winner.
 REQUIRED_RESPONSE_COLS = (SET_COL, ROLL_COL, TIMESTAMP_COL)
+
+# Faculty_Report's answer text styles, shared with As_Typed so the two always agree.
+RIGHT_FONT = Font(bold=True, color="FF0000FF")
+WRONG_FONT = Font(bold=True, italic=True, color="FFFF0000")
+
+AS_TYPED_NOTE = (
+    "Coloured against each set's key when this report was made. A key fix in "
+    "Faculty_Report is not reflected here; regenerate the report after correcting the bank."
+)
 
 
 @dataclass
@@ -253,6 +266,12 @@ def check_all_responses(
         for q in question_bank.get_all()
     }
 
+    # Same Questions papers: students answered by position, so re-key to bank questions
+    # (and bank letters) first; everything below then scores as usual.
+    set_map = read_set_map(question_papers_path)
+    if set_map is not None:
+        response_df = normalize_response_sheet(to_bank_columns(response_df, set_map))
+
     scored_df, superseded = _deduplicate_submissions(response_df)
 
     student_reports: List[StudentReport] = []
@@ -446,11 +465,11 @@ def _color_code_answers(
         # Text: right or wrong against the key, whether or not it was their question.
         (
             f'AND({answer}<>"",{answer}={key})',
-            DifferentialStyle(font=Font(bold=True, color="FF0000FF")),
+            DifferentialStyle(font=RIGHT_FONT),
         ),
         (
             f'AND({answer}<>"",{answer}<>{key})',
-            DifferentialStyle(font=Font(bold=True, italic=True, color="FFFF0000")),
+            DifferentialStyle(font=WRONG_FONT),
         ),
         # Background: was this question theirs?
         (
@@ -687,6 +706,41 @@ def _write_faculty_report(
     return cached_values
 
 
+def _write_as_typed(writer: pd.ExcelWriter, scored_df: pd.DataFrame, set_map: SetMap) -> None:
+    """
+    Write 'As_Typed': what each student typed by paper position (Q1..Qn), coloured
+    right/wrong against their own set's key. Rows follow Faculty_Report's order.
+    Colours are fixed at the time the report is made.
+    """
+    ws = writer.book.create_sheet("As_Typed")
+    typed_df = to_positional_columns(scored_df, set_map)
+    n = len(next(iter(set_map.values()))) if set_map else 0
+
+    ws.cell(row=1, column=1, value=AS_TYPED_NOTE)
+
+    headers = ["Roll Number", "Full Name", "Set"] + [f"Q{i}" for i in range(1, n + 1)] + ["Correct"]
+    for col, header in enumerate(headers, 1):
+        ws.cell(row=3, column=col, value=header).font = Font(bold=True)
+
+    for offset, (_, row) in enumerate(typed_df.iterrows()):
+        excel_row = 4 + offset
+        set_no = _cell_text(row.get(SET_COL))
+        ws.cell(row=excel_row, column=1, value=_cell_text(row.get(ROLL_COL)))
+        ws.cell(row=excel_row, column=2, value=_cell_text(row.get(NAME_COL)))
+        ws.cell(row=excel_row, column=3, value=set_no)
+
+        correct = 0
+        for position, entry in enumerate(set_map[set_no], start=1):
+            typed = _normalize_answer(row.get(answer_column(position)))
+            if typed is None:
+                continue
+            is_right = typed == entry.answer.strip().upper()
+            correct += is_right
+            cell = ws.cell(row=excel_row, column=3 + position, value=typed)
+            cell.font = RIGHT_FONT if is_right else WRONG_FONT
+        ws.cell(row=excel_row, column=4 + n, value=correct)
+
+
 def _inject_cached_values(output_path, sheet_name: str, cached: Dict[str, float]) -> None:
     """
     Write cached results into formula cells of an already-saved .xlsx.
@@ -879,6 +933,10 @@ def generate_scoring_report(
             faculty_cached = _write_faculty_report(
                 writer, response_df, question_bank, set_to_question_nos
             )
+
+            set_map = read_set_map(question_papers_path)
+            if set_map is not None:
+                _write_as_typed(writer, response_df, set_map)
 
     # Must run after the writer closes — it rewrites the saved workbook.
     _inject_cached_values(output_path, "Faculty_Report", faculty_cached)

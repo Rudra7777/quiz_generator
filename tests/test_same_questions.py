@@ -257,3 +257,124 @@ def test_positional_direction_refuses_filled_non_bank_column(tmp_path):
     bank_df.loc[0, "Q - 05 [Answer]"] = "A"
     with pytest.raises(ValueError, match="not a question in the bank"):
         to_positional_columns(bank_df, sets)
+
+
+# ── Scoring Same Questions responses ─────────────────────────────────────────
+
+from answer_checker import (
+    check_all_responses, generate_scoring_report, normalize_response_sheet,
+)
+from response_generator import ROLL_COL
+
+
+def _score(df, path, bank):
+    return check_all_responses(normalize_response_sheet(df), str(path), bank)
+
+
+def _scored_workbook(report, path, bank, tmp_path):
+    out = tmp_path / "report.xlsx"
+    generate_scoring_report(report, str(out), str(path), bank)
+    return load_workbook(out)
+
+
+def test_scores_match_what_the_generator_intended(same_papers):
+    df = generate_responses(str(same_papers.path), same_papers.bank, 6, correct_rate=0.6, seed=7)
+    report = _score(df, same_papers.path, same_papers.bank)
+    by_roll = {r.roll_number: r for r in report.student_reports}
+    assert len(by_roll) == len(df)
+    for _, row in df.iterrows():
+        key = [p.answer for p in same_papers.sets[row["Question Set"]]]
+        typed = [row[answer_column(i)] for i in range(1, 21)]
+        r = by_roll[str(row[ROLL_COL]).strip()]
+        assert r.correct == sum(t == k for t, k in zip(typed, key))
+        assert r.assigned == 20 and r.validation.extra_count == 0
+
+
+def test_blank_position_is_wrong(same_papers):
+    key = [p.answer for p in same_papers.sets["S-01"]]
+    df = _one_student("S-01", {i: key[i - 1] for i in range(1, 20)})  # position 20 left blank
+    df[ROLL_COL] = "R1"
+    df["Timestamp"] = pd.Timestamp("2026-01-01")
+    report = _score(df, same_papers.path, same_papers.bank)
+    r = report.student_reports[0]
+    assert (r.correct, r.wrong, r.assigned) == (19, 1, 20)
+
+
+def test_faculty_report_is_by_bank_question_with_the_bank_key(same_papers, tmp_path):
+    df = generate_responses(str(same_papers.path), same_papers.bank, 6, seed=7)
+    report = _score(df, same_papers.path, same_papers.bank)
+    ws = _scored_workbook(report, same_papers.path, same_papers.bank, tmp_path)["Faculty_Report"]
+    strip = [c.value for c in ws[1] if c.value]
+    key = [c.value for c in ws[2] if c.value]
+    assert strip == [f"Q{n:02d}" for n in range(1, 21)]
+    assert key == [q.answer for q in sorted(same_papers.bank.get_all(), key=lambda q: q.question_no)]
+    # no extra-answer (yellow) rule fires: every student answered only their own questions
+    assert all(r.validation.extra_count == 0 for r in report.student_reports)
+
+
+def test_as_typed_sheet(same_papers, tmp_path):
+    df = generate_responses(str(same_papers.path), same_papers.bank, 6, correct_rate=0.5, seed=7)
+    report = _score(df, same_papers.path, same_papers.bank)
+    wb = _scored_workbook(report, same_papers.path, same_papers.bank, tmp_path)
+    assert wb.sheetnames.index("As_Typed") == wb.sheetnames.index("Faculty_Report") + 1
+    ws = wb["As_Typed"]
+    assert ws["A1"].value.startswith("Coloured against each set's key")
+    assert [c.value for c in ws[3]] == (
+        ["Roll Number", "Full Name", "Set"] + [f"Q{i}" for i in range(1, 21)] + ["Correct"])
+    scores = {str(row[0].value): row[6].value for row in wb["Scores"].iter_rows(min_row=2)}
+    typed_by_roll = {str(row[ROLL_COL]).strip(): row for _, row in df.iterrows()}
+    rows = list(ws.iter_rows(min_row=4, values_only=False))
+    assert len(rows) == len(df)
+    for cells in rows:
+        roll = str(cells[0].value)
+        src = typed_by_roll[roll]
+        key = [p.answer for p in same_papers.sets[cells[2].value]]
+        for i in range(1, 21):
+            cell = cells[2 + i]
+            assert cell.value == src[answer_column(i)]
+            if cell.value is not None:
+                assert cell.font.italic == (cell.value != key[i - 1])
+        assert cells[23].value == scores[roll] and isinstance(cells[23].value, int)
+
+
+def test_as_typed_leaves_blank_unfilled(same_papers, tmp_path):
+    df = _one_student("S-01", {1: "A"})
+    df[ROLL_COL] = "R1"
+    df["Timestamp"] = pd.Timestamp("2026-01-01")
+    report = _score(df, same_papers.path, same_papers.bank)
+    ws = _scored_workbook(report, same_papers.path, same_papers.bank, tmp_path)["As_Typed"]
+    assert ws.cell(row=4, column=5).value is None
+    assert ws.cell(row=4, column=5).fill.fill_type is None
+
+
+def test_non_contiguous_bank_scores_end_to_end(tmp_path):
+    numbers = [3, 7, 15, 102, 4, 9, 11, 20, 33, 41, 58, 60, 71, 85, 90, 99, 105, 110, 111, 120]
+    bank = FullQuestionBank([_question(no) for no in numbers])
+    sets, path = _papers_file(bank, tmp_path, num_sets=4, seed=2)
+    df = generate_responses(str(path), bank, 4, correct_rate=0.7, seed=3)
+    report = _score(df, path, bank)
+    by_roll = {r.roll_number: r for r in report.student_reports}
+    for _, row in df.iterrows():
+        key = [p.answer for p in sets[row["Question Set"]]]
+        typed = [row[answer_column(i)] for i in range(1, 21)]
+        r = by_roll[str(row[ROLL_COL]).strip()]
+        assert r.correct == sum(t == k for t, k in zip(typed, key))
+        assert r.validation.extra_count == 0
+    wb = _scored_workbook(report, path, bank, tmp_path)
+    strip = [c.value for c in wb["Faculty_Report"][1] if c.value]
+    assert strip == [f"Q{n:02d}" for n in sorted(numbers)]
+    assert wb["As_Typed"].max_row == 3 + len(df)
+
+
+def test_old_papers_have_no_as_typed_sheet(tmp_path):
+    from pathlib import Path
+    from excel_handler import load_question_bank
+    root = Path(__file__).resolve().parents[1]
+    bank = load_question_bank(str(root / "input" / "question_bank_72.xlsx"))
+    papers = root / "output" / "question_papers.xlsx"
+    df = generate_responses(str(papers), bank, 5, seed=1)
+    report = check_all_responses(normalize_response_sheet(df), str(papers), bank)
+    out = tmp_path / "report.xlsx"
+    generate_scoring_report(report, str(out), str(papers), bank)
+    wb = load_workbook(out)
+    assert "Faculty_Report" in wb.sheetnames and "As_Typed" not in wb.sheetnames
