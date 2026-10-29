@@ -106,10 +106,17 @@ def _config_step() -> rx.Component:
             ),
             rx.cond(
                 GenerateState.paper_mode == "Same Questions",
-                rx.text(
-                    "Every set gets all ", GenerateState.bank_size,
-                    " questions, in its own order and with its own options.",
-                    size="2", color_scheme="gray",
+                rx.cond(
+                    GenerateState.bank_uploaded,
+                    rx.text(
+                        "Every set gets all ", GenerateState.bank_size,
+                        " questions, in its own order and with its own options.",
+                        size="2", color_scheme="gray",
+                    ),
+                    rx.text(
+                        "Every set gets all the bank's questions, in its own order and with its own options.",
+                        size="2", color_scheme="gray",
+                    ),
                 ),
                 field(
                     "Questions per quiz",
@@ -208,7 +215,7 @@ def _difficulty_step() -> rx.Component:
 
 def _seed_step() -> rx.Component:
     return section(
-        "6",
+        rx.cond(GenerateState.paper_mode == "Same Questions", "5", "6"),
         "Randomization",
         "Use a fixed seed to reproduce an identical allocation.",
         rx.vstack(
@@ -234,9 +241,13 @@ def _seed_step() -> rx.Component:
 
 def _generate_step() -> rx.Component:
     return section(
-        "7",
+        rx.cond(GenerateState.paper_mode == "Same Questions", "6", "7"),
         "Generate question papers",
-        "Produces one sheet per student plus answer key, tables, and an embedded bank.",
+        rx.cond(
+            GenerateState.paper_mode == "Same Questions",
+            "Produces one sheet per student plus answer key, set map, and an embedded bank.",
+            "Produces one sheet per student plus answer key, tables, and an embedded bank.",
+        ),
         rx.vstack(
             rx.button(
                 rx.icon("rocket", size=18),
