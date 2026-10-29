@@ -20,7 +20,7 @@ from typing import Dict, FrozenSet, List, Optional, Tuple
 
 import pandas as pd
 
-from excel_handler import FullQuestion, FullQuestionBank, set_label
+from excel_handler import SET_LABEL_RE, FullQuestion, FullQuestionBank, set_label
 
 
 SET_MAP_SHEET = "Set_Map"
@@ -208,12 +208,40 @@ def read_set_map(papers_path: str) -> Optional[SetMap]:
     if header_row is None:
         return None
 
+    rows: Dict[str, List[Tuple[int, SetPosition]]] = {}
+    for idx, row in raw.iloc[header_row + 1:].iterrows():
+        sheet_row = idx + 1
+        label = _cell_text(row[0])
+        if not SET_LABEL_RE.match(label):
+            continue   # blank rows and notes typed below the table
+        try:
+            position = _whole_number(row[1])
+            question_no = _whole_number(row[2])
+            slots = "".join(_cell_text(row[i]) for i in (3, 4, 5, 6))
+            answer = _cell_text(row[7])
+            if sorted(slots) != list("ABCD") or answer not in list("ABCD"):
+                raise ValueError("option letters must be A-D")
+        except ValueError as exc:
+            raise ValueError(f"{SET_MAP_SHEET} row {sheet_row}: invalid data "
+                             f"for set {label} ({exc})") from None
+        rows.setdefault(label, []).append((position, SetPosition(question_no, slots, answer)))
+
     set_map: SetMap = {}
-    for _, row in raw.iloc[header_row + 1:].iterrows():
-        if pd.isna(row[0]):
-            continue
-        slots = "".join(str(row[i]).strip() for i in (3, 4, 5, 6))
-        set_map.setdefault(str(row[0]).strip(), []).append(
-            SetPosition(int(row[2]), slots, str(row[7]).strip())
-        )
+    for label, entries in rows.items():
+        if sorted(p for p, _ in entries) != list(range(1, len(entries) + 1)):
+            raise ValueError(f"{SET_MAP_SHEET}: positions for set {label} must be "
+                             f"exactly 1 to {len(entries)}, each once")
+        set_map[label] = [sp for _, sp in sorted(entries, key=lambda e: e[0])]
+    if len({len(v) for v in set_map.values()}) > 1:
+        raise ValueError(f"{SET_MAP_SHEET}: all sets must have the same number of questions")
     return set_map
+
+
+def _cell_text(value) -> str:
+    return "" if pd.isna(value) else str(value).strip()
+
+
+def _whole_number(value) -> int:
+    if pd.isna(value) or float(value) != int(float(value)):
+        raise ValueError("expected a whole number")
+    return int(float(value))

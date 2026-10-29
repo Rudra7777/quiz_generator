@@ -409,3 +409,59 @@ def test_real_bank_first_20_questions_are_not_held(tmp_path):
     path = tmp_path / "bank20.xlsx"
     pd.read_excel("input/question_bank.xlsx").head(20).to_excel(path, index=False)
     assert held_in_place(load_question_bank(str(path))) == []
+
+
+# --- Set_Map robustness ------------------------------------------------------
+
+def _edit_set_map(path, edit):
+    wb = load_workbook(path)
+    ws = wb["Set_Map"]
+    edit(ws)
+    wb.save(path)
+
+
+def _data_rows(ws):
+    return [[c.value for c in r] for r in ws.iter_rows(min_row=4, max_row=ws.max_row)
+            if r[0].value is not None]
+
+
+def test_set_map_survives_sorting_the_sheet(bank20, tmp_path):
+    sets, path = _papers_file(bank20, tmp_path)
+
+    def resort(ws):
+        rows = sorted(_data_rows(ws), key=lambda r: (r[2], r[0]))
+        for i, values in enumerate(rows, 4):
+            for col, v in enumerate(values, 1):
+                ws.cell(row=i, column=col, value=v)
+
+    _edit_set_map(path, resort)
+    assert read_set_map(str(path)) == sets
+
+
+def test_broken_position_column_raises(bank20, tmp_path):
+    _, path = _papers_file(bank20, tmp_path)
+    _edit_set_map(path, lambda ws: ws.cell(row=5, column=2, value=1))   # duplicate position
+    with pytest.raises(ValueError, match="positions"):
+        read_set_map(str(path))
+
+
+def test_sets_of_different_lengths_raise(bank20, tmp_path):
+    _, path = _papers_file(bank20, tmp_path)
+    _edit_set_map(path, lambda ws: ws.delete_rows(ws.max_row))   # drop S-04's last row
+    with pytest.raises(ValueError, match="same number"):
+        read_set_map(str(path))
+
+
+def test_note_row_is_ignored_but_bad_data_row_is_named(bank20, tmp_path):
+    sets, path = _papers_file(bank20, tmp_path)
+    _edit_set_map(path, lambda ws: ws.cell(row=ws.max_row + 2, column=1, value="remember to check"))
+    assert read_set_map(str(path)) == sets
+
+    _edit_set_map(path, lambda ws: ws.cell(row=6, column=3, value="oops"))
+    with pytest.raises(ValueError, match="row 6"):
+        read_set_map(str(path))
+
+    _edit_set_map(path, lambda ws: (ws.cell(row=6, column=3, value=1),
+                                    setattr(ws.cell(row=6, column=8), "value", None)))
+    with pytest.raises(ValueError, match="row 6"):
+        read_set_map(str(path))

@@ -529,7 +529,6 @@ def create_formatted_excel(
     green_fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
     orange_fill = PatternFill(start_color="ED7D31", end_color="ED7D31", fill_type="solid")
     thin_border = THIN_BORDER
-    wrap_align = WRAP_ALIGN
     center_align = CENTER_ALIGN
 
     # Remove default sheet
