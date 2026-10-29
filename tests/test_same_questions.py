@@ -80,3 +80,90 @@ def test_more_sets_than_possible_orders_is_refused():
     bank3 = FullQuestionBank([_question(no) for no in (1, 2, 3)])
     with pytest.raises(ValueError, match="only 6 different orders"):
         build_same_question_sets(bank3, 7, seed=0)
+
+
+# ── Papers file ──────────────────────────────────────────────────────────────
+
+import io
+
+from openpyxl import load_workbook
+
+from excel_export import (
+    _load_question_bank_from_question_papers, create_formatted_excel,
+    create_same_questions_excel,
+)
+from same_questions import read_set_map, variant_papers
+
+
+def _papers_file(bank, tmp_path, num_sets=4, seed=1):
+    sets = build_same_question_sets(bank, num_sets, seed=seed)
+    path = tmp_path / "papers.xlsx"
+    path.write_bytes(create_same_questions_excel(sets, bank, seed=seed))
+    return sets, path
+
+
+def test_same_questions_file_has_the_expected_sheets(bank20):
+    data = create_same_questions_excel(build_same_question_sets(bank20, 4, seed=1), bank20, seed=1)
+    wb = load_workbook(io.BytesIO(data))
+    assert wb.sheetnames == ["All_Sets", "S-01", "S-02", "S-03", "S-04",
+                             "Answer_Key", "Set_Map", "Question_Bank"]
+
+
+def test_set_map_round_trips(bank20, tmp_path):
+    sets, path = _papers_file(bank20, tmp_path)
+    assert read_set_map(str(path)) == sets
+
+
+def test_old_papers_have_no_set_map(tmp_path):
+    bank = FullQuestionBank([_question(no, difficulty="hard") for no in range(1, 5)])
+    matrix = [["Q1", "Q2"], ["Q3", "Q4"]]
+    path = tmp_path / "old.xlsx"
+    path.write_bytes(create_formatted_excel(matrix, matrix, {}, bank))
+    assert read_set_map(str(path)) is None
+
+
+def test_paper_prints_positions_and_shuffled_options_without_bank_numbers(bank20, tmp_path):
+    sets, path = _papers_file(bank20, tmp_path)
+    ws = load_workbook(path)["S-02"]
+    bank = {q.question_no: q for q in bank20.get_all()}
+    assert ws["C2"].value is None
+    for k in range(1, 21):
+        row = k + 2
+        p = sets["S-02"][k - 1]
+        assert ws.cell(row=row, column=1).value == k
+        assert ws.cell(row=row, column=3).value is None
+        assert ws.cell(row=row, column=2).value == p.question_no
+        assert ws.cell(row=row, column=4).value == bank[p.question_no].question_text
+        original = getattr(bank[p.question_no], f"option_{p.slots[0].lower()}")
+        assert ws.cell(row=row, column=5).value == f"A] {original}"
+
+
+def test_answer_key_is_per_set_by_position(bank20, tmp_path):
+    sets, path = _papers_file(bank20, tmp_path)
+    ws = load_workbook(path)["Answer_Key"]
+    row = next(r for r in range(1, 12) if ws.cell(row=r, column=1).value == "S-03")
+    for k in range(1, 21):
+        assert ws.cell(row=row, column=k + 1).value == sets["S-03"][k - 1].answer
+
+
+def test_question_bank_sheet_holds_the_bank_as_uploaded(bank20, tmp_path):
+    _, path = _papers_file(bank20, tmp_path)
+    loaded = _load_question_bank_from_question_papers(str(path))
+    for got, want in zip(loaded.get_all(), bank20.get_all()):
+        assert (got.question_no, got.question_text, got.option_a, got.option_b,
+                got.option_c, got.option_d, got.answer) == (
+            want.question_no, want.question_text, want.option_a, want.option_b,
+            want.option_c, want.option_d, want.answer)
+    assert len(loaded.get_all()) == 20
+
+
+def test_variant_papers_print_options_in_set_order(bank20):
+    sets = build_same_question_sets(bank20, 3, seed=5)
+    variants, matrix = variant_papers(bank20, sets)
+    bank = {q.question_no: q for q in bank20.get_all()}
+    assert [len(ids) for ids in matrix] == [20, 20, 20]
+    p = sets["S-02"][0]
+    v = variants.get_by_id(matrix[1][0])
+    assert v.question_id == f"S-02:{bank[p.question_no].question_id}"
+    assert v.answer == p.answer and v.difficulty == bank[p.question_no].difficulty
+    assert v.option_a == getattr(bank[p.question_no], f"option_{p.slots[0].lower()}")

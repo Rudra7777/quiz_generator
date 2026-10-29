@@ -16,7 +16,9 @@ import random
 import re
 from dataclasses import dataclass
 from itertools import permutations
-from typing import Dict, FrozenSet, List, Optional
+from typing import Dict, FrozenSet, List, Optional, Tuple
+
+import pandas as pd
 
 from excel_handler import FullQuestion, FullQuestionBank, set_label
 
@@ -154,3 +156,55 @@ def build_same_question_sets(bank: FullQuestionBank, num_sets: int,
         sets[set_label(number)] = positions
 
     return sets
+
+
+def variant_papers(bank: FullQuestionBank,
+                   set_map: SetMap) -> Tuple[FullQuestionBank, List[List[str]]]:
+    """
+    One FullQuestion per set per position, options in printed order and the answer
+    the set's own letter, so the existing paper writer can print any set. Ids are
+    f"{label}:{original_id}"; the matrix lists each set's ids in printed order.
+    """
+    by_no = {q.question_no: q for q in bank.get_all()}
+    variants, matrix = [], []
+    for label, positions in set_map.items():
+        ids = []
+        for p in positions:
+            q = by_no[p.question_no]
+            options = {"A": q.option_a, "B": q.option_b, "C": q.option_c, "D": q.option_d}
+            a, b, c, d = (options[letter] for letter in p.slots)
+            variant = FullQuestion(
+                question_no=q.question_no, question_id=f"{label}:{q.question_id}",
+                question_text=q.question_text, option_a=a, option_b=b, option_c=c,
+                option_d=d, answer=p.answer, difficulty=q.difficulty,
+            )
+            variants.append(variant)
+            ids.append(variant.question_id)
+        matrix.append(ids)
+    return FullQuestionBank(variants), matrix
+
+
+def read_set_map(papers_path: str) -> Optional[SetMap]:
+    """Read the Set_Map sheet back from a papers file; None if it has none."""
+    try:
+        raw = pd.read_excel(papers_path, sheet_name=SET_MAP_SHEET, header=None)
+    except ValueError:
+        return None   # no such sheet
+
+    header_row = next(
+        (i for i, row in raw.iterrows()
+         if str(row[0]).strip() == "Set" and str(row[1]).strip() == "Position"),
+        None,
+    )
+    if header_row is None:
+        return None
+
+    set_map: SetMap = {}
+    for _, row in raw.iloc[header_row + 1:].iterrows():
+        if pd.isna(row[0]):
+            continue
+        slots = "".join(str(row[i]).strip() for i in (3, 4, 5, 6))
+        set_map.setdefault(str(row[0]).strip(), []).append(
+            SetPosition(int(row[2]), slots, str(row[7]).strip())
+        )
+    return set_map

@@ -26,6 +26,7 @@ from openpyxl.worksheet.properties import PageSetupProperties
 
 from answer_checker import _inject_cached_values
 from excel_handler import load_question_bank, set_label, FullQuestionBank
+from same_questions import SET_MAP_SHEET, SetMap, variant_papers
 
 
 # Sheet holding every set stacked one below another, for A4 portrait printing.
@@ -70,6 +71,9 @@ SUMMARY_FILL = PatternFill(start_color="DDEBF7", end_color="DDEBF7", fill_type="
 # QB_SUMMARY_ROW, and the bank table itself (with its filter buttons) from QB_HEADER_ROW.
 QB_SUMMARY_ROW = 3
 QB_HEADER_ROW = 11
+
+# Set_Map sheet: title on row 1, optional seed on row 2, column headers on row 3.
+SET_MAP_HEADER_ROW = 3
 
 # Text size estimates, used to plan widths and to size merged case rows (Excel will
 # not auto-fit a merged cell): about 12 characters of 11pt prose per 11 width units,
@@ -200,6 +204,7 @@ def _write_set_block(
     question_bank: FullQuestionBank,
     case_rows: Sequence[Tuple[str, float]] = (),
     font_size: float = SET_FONT_SIZES[0],
+    show_code: bool = True,
 ) -> int:
     """
     Draw one set's paper starting at `top_row`, returning the row after it.
@@ -209,6 +214,9 @@ def _write_set_block(
 
     `case_rows`, from `_case_rows`, puts a case study between the QSet line and
     the questions, under a 'Case Study' heading.
+
+    `show_code=False` leaves the printed QCd column (C) empty, header included, so a
+    paper does not reveal bank numbers; hidden column B still holds them.
     """
     font = Font(name="Calibri", size=font_size)
     bold = Font(name="Calibri", size=font_size, bold=True)
@@ -248,7 +256,7 @@ def _write_set_block(
     # 'Q- 27' form, which is what students copy into the form.
     header_row = row
     for col, header in enumerate(['Sr', 'QCd', 'QCd', 'Question', 'A', 'B', 'C', 'D'], 1):
-        cell = ws.cell(row=header_row, column=col, value=header)
+        cell = ws.cell(row=header_row, column=col, value=None if col == 3 and not show_code else header)
         cell.font = bold
         cell.border = THIN_BORDER
         cell.alignment = CENTER_ALIGN
@@ -260,7 +268,8 @@ def _write_set_block(
         row = header_row + 1 + q_idx
         ws.cell(row=row, column=1, value=q_idx + 1)
         ws.cell(row=row, column=2, value=q.question_no).fill = QCD_FILL
-        ws.cell(row=row, column=3, value=question_code(q.question_no))
+        if show_code:
+            ws.cell(row=row, column=3, value=question_code(q.question_no))
         ws.cell(row=row, column=4, value=q.question_text)
         options = (q.option_a, q.option_b, q.option_c, q.option_d)
         for col, (letter, text) in enumerate(zip('ABCD', options), 5):
@@ -282,6 +291,7 @@ def _write_all_sets_sheet(
     widths: dict,
     font_size: float,
     case_rows: Sequence[Tuple[str, float]] = (),
+    show_code: bool = True,
 ) -> None:
     """
     Write every set one below another on a single A4-portrait print sheet.
@@ -295,7 +305,8 @@ def _write_all_sets_sheet(
     row = 1
     for student_idx, quiz in enumerate(shuffled_matrix):
         row = _write_set_block(
-            ws, row, set_label(student_idx + 1), quiz, question_bank, case_rows, font_size
+            ws, row, set_label(student_idx + 1), quiz, question_bank, case_rows, font_size,
+            show_code,
         )
         if student_idx < len(shuffled_matrix) - 1:
             ws.row_breaks.append(Break(id=row - 1))
@@ -407,6 +418,88 @@ def question_code(question_no: int) -> str:
     return f"Q- {question_no:02d}"
 
 
+def _write_answer_key_sheet(wb, shuffled_matrix: list, question_bank: FullQuestionBank) -> None:
+    """Answer_Key: one row per set, the correct letter for each position."""
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font_white = Font(bold=True, size=11, color="FFFFFF")
+    thin_border = THIN_BORDER
+
+    ws = wb.create_sheet(title="Answer_Key")
+    ws['A1'] = "ANSWER KEY (For Teachers Only)"
+    ws['A1'].font = Font(bold=True, size=16, color="FF0000")
+    num_q = len(shuffled_matrix[0])
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=num_q + 1)
+
+    headers = ['Set'] + [f'Q{i+1}' for i in range(num_q)]
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=3, column=col, value=h)
+        cell.font = header_font_white
+        cell.fill = header_fill
+        cell.border = thin_border
+
+    for student_idx, quiz in enumerate(shuffled_matrix):
+        row = student_idx + 4
+        ws.cell(row=row, column=1, value=set_label(student_idx + 1)).border = thin_border
+        for q_idx, qid in enumerate(quiz):
+            q = question_bank.get_by_id(qid)
+            ws.cell(row=row, column=q_idx + 2, value=q.answer).border = thin_border
+
+
+def _write_question_bank_sheet(wb, question_bank: FullQuestionBank) -> dict:
+    """
+    Question_Bank: the bank embedded for Part 2 answer checking, plus its summary
+    grid. Returns the summary formulas' cached results for _inject_cached_values.
+    """
+    header_font_white = Font(bold=True, size=11, color="FFFFFF")
+    thin_border = THIN_BORDER
+    wrap_align = WRAP_ALIGN
+    center_align = CENTER_ALIGN
+
+    ws = wb.create_sheet(title="Question_Bank")
+    ws['A1'] = "Question Bank (Embedded for Answer Checking)"
+    ws['A1'].font = Font(bold=True, size=14)
+    ws.merge_cells('A1:H1')
+
+    qb_headers = ['question_no', 'question', 'option_a', 'option_b',
+                   'option_c', 'option_d', 'answer', 'difficulty']
+    qb_fill = PatternFill(start_color="8DB4E2", end_color="8DB4E2", fill_type="solid")
+    for col, h in enumerate(qb_headers, 1):
+        cell = ws.cell(row=QB_HEADER_ROW, column=col, value=h)
+        cell.font = header_font_white
+        cell.fill = qb_fill
+        cell.border = thin_border
+
+    for q_idx, q in enumerate(question_bank.get_all()):
+        row = QB_HEADER_ROW + 1 + q_idx
+        ws.cell(row=row, column=1, value=q.question_no).border = thin_border
+        ws.cell(row=row, column=1).alignment = center_align
+        ws.cell(row=row, column=2, value=q.question_text).border = thin_border
+        ws.cell(row=row, column=2).alignment = wrap_align
+        ws.cell(row=row, column=3, value=q.option_a).border = thin_border
+        ws.cell(row=row, column=4, value=q.option_b).border = thin_border
+        ws.cell(row=row, column=5, value=q.option_c).border = thin_border
+        ws.cell(row=row, column=6, value=q.option_d).border = thin_border
+        ws.cell(row=row, column=7, value=q.answer).border = thin_border
+        ws.cell(row=row, column=7).alignment = center_align
+        ws.cell(row=row, column=8, value=q.difficulty.capitalize()).border = thin_border
+
+        # Highlight the correct option so faculty can check the key at a glance.
+        answer = str(q.answer).strip().upper()
+        if answer in 'ABCD':
+            ws.cell(row=row, column=3 + 'ABCD'.index(answer)).fill = CORRECT_OPTION_FILL
+
+    ws.column_dimensions['A'].width = 12
+    ws.column_dimensions['B'].width = 50
+    for ch in 'CDEF':
+        ws.column_dimensions[ch].width = 20
+    ws.column_dimensions['G'].width = 10
+    ws.column_dimensions['H'].width = 12
+
+    last_bank_row = QB_HEADER_ROW + len(question_bank.get_all())
+    ws.auto_filter.ref = f"A{QB_HEADER_ROW}:H{last_bank_row}"
+    return _write_bank_summary(ws, question_bank, last_bank_row)
+
+
 def create_formatted_excel(
     allocation_matrix: list,
     shuffled_matrix: list,
@@ -457,29 +550,8 @@ def create_formatted_excel(
         # count there would make Excel ignore the breaks between sets.
         ws.page_setup.fitToHeight = 1
 
-    # ══════════════════════════════════════════════════════════════════════
-    # Answer Key Sheet
-    # ══════════════════════════════════════════════════════════════════════
     if include_answer_key:
-        ws = wb.create_sheet(title="Answer_Key")
-        ws['A1'] = "ANSWER KEY (For Teachers Only)"
-        ws['A1'].font = Font(bold=True, size=16, color="FF0000")
-        num_q = len(shuffled_matrix[0])
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=num_q + 1)
-
-        headers = ['Set'] + [f'Q{i+1}' for i in range(num_q)]
-        for col, h in enumerate(headers, 1):
-            cell = ws.cell(row=3, column=col, value=h)
-            cell.font = header_font_white
-            cell.fill = header_fill
-            cell.border = thin_border
-
-        for student_idx, quiz in enumerate(shuffled_matrix):
-            row = student_idx + 4
-            ws.cell(row=row, column=1, value=set_label(student_idx + 1)).border = thin_border
-            for q_idx, qid in enumerate(quiz):
-                q = question_bank.get_by_id(qid)
-                ws.cell(row=row, column=q_idx + 2, value=q.answer).border = thin_border
+        _write_answer_key_sheet(wb, shuffled_matrix, question_bank)
 
     # ══════════════════════════════════════════════════════════════════════
     # Allocation Table Sheet (original order, numeric question numbers)
@@ -636,52 +708,7 @@ def create_formatted_excel(
     ws.column_dimensions['D'].width = 14
     ws.column_dimensions['E'].width = 12
 
-    # ══════════════════════════════════════════════════════════════════════
-    # Question Bank Sheet (embedded for Part 2 answer checking)
-    # ══════════════════════════════════════════════════════════════════════
-    ws = wb.create_sheet(title="Question_Bank")
-    ws['A1'] = "Question Bank (Embedded for Answer Checking)"
-    ws['A1'].font = Font(bold=True, size=14)
-    ws.merge_cells('A1:H1')
-
-    qb_headers = ['question_no', 'question', 'option_a', 'option_b',
-                   'option_c', 'option_d', 'answer', 'difficulty']
-    qb_fill = PatternFill(start_color="8DB4E2", end_color="8DB4E2", fill_type="solid")
-    for col, h in enumerate(qb_headers, 1):
-        cell = ws.cell(row=QB_HEADER_ROW, column=col, value=h)
-        cell.font = header_font_white
-        cell.fill = qb_fill
-        cell.border = thin_border
-
-    for q_idx, q in enumerate(question_bank.get_all()):
-        row = QB_HEADER_ROW + 1 + q_idx
-        ws.cell(row=row, column=1, value=q.question_no).border = thin_border
-        ws.cell(row=row, column=1).alignment = center_align
-        ws.cell(row=row, column=2, value=q.question_text).border = thin_border
-        ws.cell(row=row, column=2).alignment = wrap_align
-        ws.cell(row=row, column=3, value=q.option_a).border = thin_border
-        ws.cell(row=row, column=4, value=q.option_b).border = thin_border
-        ws.cell(row=row, column=5, value=q.option_c).border = thin_border
-        ws.cell(row=row, column=6, value=q.option_d).border = thin_border
-        ws.cell(row=row, column=7, value=q.answer).border = thin_border
-        ws.cell(row=row, column=7).alignment = center_align
-        ws.cell(row=row, column=8, value=q.difficulty.capitalize()).border = thin_border
-
-        # Highlight the correct option so faculty can check the key at a glance.
-        answer = str(q.answer).strip().upper()
-        if answer in 'ABCD':
-            ws.cell(row=row, column=3 + 'ABCD'.index(answer)).fill = CORRECT_OPTION_FILL
-
-    ws.column_dimensions['A'].width = 12
-    ws.column_dimensions['B'].width = 50
-    for ch in 'CDEF':
-        ws.column_dimensions[ch].width = 20
-    ws.column_dimensions['G'].width = 10
-    ws.column_dimensions['H'].width = 12
-
-    last_bank_row = QB_HEADER_ROW + len(question_bank.get_all())
-    ws.auto_filter.ref = f"A{QB_HEADER_ROW}:H{last_bank_row}"
-    bank_summary_cached = _write_bank_summary(ws, question_bank, last_bank_row)
+    bank_summary_cached = _write_question_bank_sheet(wb, question_bank)
 
     # ══════════════════════════════════════════════════════════════════════
     # Combined Print Sheet (every set stacked, A4 portrait)
@@ -692,6 +719,77 @@ def create_formatted_excel(
     output = io.BytesIO()
     wb.save(output)
     # Give the summary formulas a result to show before Excel recalculates.
+    _inject_cached_values(output, "Question_Bank", bank_summary_cached)
+    output.seek(0)
+    return output.getvalue()
+
+
+def _write_set_map_sheet(wb, set_map: SetMap, seed: Optional[int]) -> None:
+    """Set_Map: for each set and position, the bank question and which bank option sits in each slot."""
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font_white = Font(bold=True, size=11, color="FFFFFF")
+
+    ws = wb.create_sheet(title=SET_MAP_SHEET)
+    ws['A1'] = "Set Map (which bank question and option sits where)"
+    ws['A1'].font = Font(bold=True, size=14)
+    ws.merge_cells('A1:H1')
+    if seed is not None:
+        ws['A2'] = f"Seed: {seed}"
+        ws['A2'].font = Font(bold=True)
+
+    headers = ['Set', 'Position', 'Question No', 'A', 'B', 'C', 'D', 'Answer']
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=SET_MAP_HEADER_ROW, column=col, value=h)
+        cell.font = header_font_white
+        cell.fill = header_fill
+        cell.border = THIN_BORDER
+
+    row = SET_MAP_HEADER_ROW + 1
+    for label, positions in set_map.items():
+        for position, p in enumerate(positions, 1):
+            values = [label, position, p.question_no, *p.slots, p.answer]
+            for col, value in enumerate(values, 1):
+                cell = ws.cell(row=row, column=col, value=value)
+                cell.border = THIN_BORDER
+                cell.alignment = CENTER_ALIGN
+            row += 1
+    ws.column_dimensions['C'].width = 13
+
+
+def create_same_questions_excel(
+    set_map: SetMap,
+    question_bank: FullQuestionBank,
+    case_paragraphs: Sequence[str] = (),
+    seed: Optional[int] = None,
+) -> bytes:
+    """
+    Create the papers file for Same Questions mode: every set holds every bank
+    question, in its own order and with its own option order.
+
+    Sheets: All_Sets, one per set, Answer_Key (the set's own letters), Set_Map (how
+    each set maps back to the bank) and Question_Bank (the bank as uploaded). Printed
+    papers leave the QCd column empty so they do not show bank numbers.
+    """
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    variant_bank, shuffled_matrix = variant_papers(question_bank, set_map)
+    widths, font_size = _plan_set_layout(shuffled_matrix, variant_bank, case_paragraphs)
+    case_rows = _case_rows(case_paragraphs, _visible_width(widths), font_size)
+    for label, quiz in zip(set_map, shuffled_matrix):
+        ws = wb.create_sheet(title=label)
+        _write_set_block(ws, 1, label, quiz, variant_bank, case_rows, font_size, show_code=False)
+        _set_print_layout(ws, widths)
+        ws.page_setup.fitToHeight = 1
+
+    _write_answer_key_sheet(wb, shuffled_matrix, variant_bank)
+    _write_set_map_sheet(wb, set_map, seed)
+    bank_summary_cached = _write_question_bank_sheet(wb, question_bank)
+    _write_all_sets_sheet(wb, shuffled_matrix, variant_bank, widths, font_size, case_rows,
+                          show_code=False)
+
+    output = io.BytesIO()
+    wb.save(output)
     _inject_cached_values(output, "Question_Bank", bank_summary_cached)
     output.seek(0)
     return output.getvalue()
