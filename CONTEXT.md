@@ -23,6 +23,22 @@ One student's randomized selection of questions from the Question Bank. Labelled
 Form's set dropdown, and every output sheet.
 _Avoid_: Set_1, paper, variant, quiz
 
+**Same Questions mode**:
+A way of building Sets where every student gets every question in the Question Bank. Sets
+differ only in the order of the questions and the order of each question's A-D options.
+_Avoid_: full-bank mode, shuffle-only mode
+
+**Position**:
+A question's place within one Set (1st, 2nd, …) together with how its options are
+printed there. The same Question Number sits at different Positions in different Sets.
+_Avoid_: slot (that is an option's place, A-D), Sr, index
+
+**Set Map**:
+The record of every Set's Positions in Same Questions mode: which Question Number is at
+each Position, the bank letter printed in each of A-D, and the letter that is Correct
+there. Written to the `Set_Map` sheet so answers can be scored per Set.
+_Avoid_: key sheet, mapping, layout
+
 **Answer Key**:
 The correct option (A/B/C/D) for every question in the Question Bank.
 _Avoid_: solution, marking scheme
