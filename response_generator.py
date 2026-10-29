@@ -58,13 +58,19 @@ def _translate_columns(
     source_number,
     target_number,
     letter_map,
+    source_numbers: List[int],
+    target_numbers: List[int],
+    refusal,
 ) -> pd.DataFrame:
     """
     Re-key every row's answer columns for its set.
 
-    source_number(position) / target_number(position) give the question number an
-    answer column is read from and written to; letter_map(position) gives the
-    letter translation.
+    source_number(position, entry) / target_number(position, entry) give the question
+    number an answer column is read from and written to; letter_map(entry) gives the
+    letter translation. source_numbers are the numbers a column may validly carry and
+    target_numbers the columns written, in order. An answer column outside
+    source_numbers is dropped when blank in every row; otherwise refusal(col) is the
+    error message.
     """
     answer_cols = {}
     for col in response_df.columns:
@@ -72,14 +78,13 @@ def _translate_columns(
         if match:
             answer_cols[int(match.group(1))] = col
 
-    n = len(next(iter(set_map.values()))) if set_map else 0
     for number, col in answer_cols.items():
-        if number > n and response_df[col].notna().any():
-            raise ValueError(f"'{col}' is beyond the {n} questions on each paper")
+        if number not in source_numbers and response_df[col].notna().any():
+            raise ValueError(refusal(col))
 
     kept = [c for c in response_df.columns if c not in answer_cols.values()]
     out = response_df[kept].copy()
-    translated = {answer_column(no): [] for no in range(1, n + 1)}
+    translated = {no: [] for no in target_numbers}
 
     for idx, row in response_df.iterrows():
         set_no = str(row.get(SET_COL, "")).strip()
@@ -90,12 +95,19 @@ def _translate_columns(
             col = answer_cols.get(source_number(position, entry))
             value = row[col] if col is not None else None
             by_target[target_number(position, entry)] = _translate_letter(value, letter_map(entry))
-        for no in range(1, n + 1):
-            translated[answer_column(no)].append(by_target[no])
+        for no in target_numbers:
+            translated[no].append(by_target[no])
 
-    for col, values in translated.items():
-        out[col] = pd.Series(values, index=out.index, dtype=object)
+    for no, values in translated.items():
+        out[answer_column(no)] = pd.Series(values, index=out.index, dtype=object)
     return out
+
+
+def _bank_numbers(set_map: SetMap) -> List[int]:
+    """The bank question numbers every paper carries, in order."""
+    if not set_map:
+        return []
+    return sorted(entry.question_no for entry in next(iter(set_map.values())))
 
 
 def to_bank_columns(response_df: pd.DataFrame, set_map: SetMap) -> pd.DataFrame:
@@ -105,21 +117,30 @@ def to_bank_columns(response_df: pd.DataFrame, set_map: SetMap) -> pd.DataFrame:
     Identity columns are kept; answer columns become one per bank question_no holding
     the bank's original letter.
     """
+    bank_numbers = _bank_numbers(set_map)
+    n = len(bank_numbers)
     return _translate_columns(
         response_df, set_map,
         source_number=lambda position, entry: position,
         target_number=lambda position, entry: entry.question_no,
         letter_map=lambda entry: dict(zip("ABCD", entry.slots)),
+        source_numbers=list(range(1, n + 1)),
+        target_numbers=bank_numbers,
+        refusal=lambda col: f"'{col}' is beyond the {n} questions on each paper",
     )
 
 
 def to_positional_columns(response_df: pd.DataFrame, set_map: SetMap) -> pd.DataFrame:
     """Exact inverse of to_bank_columns: Q - 01 .. Q - n hold the letter as printed on that set."""
+    bank_numbers = _bank_numbers(set_map)
     return _translate_columns(
         response_df, set_map,
         source_number=lambda position, entry: entry.question_no,
         target_number=lambda position, entry: position,
         letter_map=lambda entry: {orig: "ABCD"[slot] for slot, orig in enumerate(entry.slots)},
+        source_numbers=bank_numbers,
+        target_numbers=list(range(1, len(bank_numbers) + 1)),
+        refusal=lambda col: f"'{col}' is not a question in the bank",
     )
 
 
@@ -326,6 +347,12 @@ def generate_responses(
     # Submissions trickle in over the quiz window, as a real Form's would.
     submitted_at = datetime(2026, 2, 16, 16, 0, 0)
 
+    set_map = read_set_map(question_papers_path)
+    column_numbers = (
+        _bank_numbers(set_map) if set_map is not None
+        else range(1, total_questions + 1)
+    )
+
     rows = []
     for student_idx in range(num_students):
         set_name = set_names[student_idx]
@@ -342,7 +369,7 @@ def generate_responses(
             SET_COL: set_name,
         }
         # Every bank question gets a column; only assigned ones get filled.
-        for q_no in range(1, total_questions + 1):
+        for q_no in column_numbers:
             row[answer_column(q_no)] = None
 
         for q_no in assigned_qnos:
@@ -360,7 +387,6 @@ def generate_responses(
         rows.append(row)
 
     df = pd.DataFrame(rows)
-    set_map = read_set_map(question_papers_path)
     if set_map is not None:
         # Every bank question is on every paper, so the columns above are complete.
         return to_positional_columns(df, set_map)

@@ -1,10 +1,17 @@
 """Tests for building every set's question order and option order in Same Questions mode."""
 
+import io
 from collections import Counter
+from types import SimpleNamespace
 
+import pandas as pd
 import pytest
+from openpyxl import load_workbook
 
 from excel_handler import FullQuestion, FullQuestionBank
+from response_generator import (
+    SET_COL, answer_column, generate_responses, to_bank_columns, to_positional_columns,
+)
 from same_questions import build_same_question_sets, fixed_slots, held_in_place
 
 
@@ -83,10 +90,6 @@ def test_more_sets_than_possible_orders_is_refused():
 
 
 # ── Papers file ──────────────────────────────────────────────────────────────
-
-import io
-
-from openpyxl import load_workbook
 
 from excel_export import (
     _load_question_bank_from_question_papers, create_formatted_excel,
@@ -171,13 +174,6 @@ def test_variant_papers_print_options_in_set_order(bank20):
 
 # ── Translating answers between positions and bank questions ─────────────────
 
-from types import SimpleNamespace
-
-import pandas as pd
-
-from response_generator import (
-    SET_COL, answer_column, generate_responses, to_bank_columns, to_positional_columns,
-)
 
 
 @pytest.fixture
@@ -235,3 +231,29 @@ def test_extra_blank_columns_are_ignored_and_filled_ones_refused(same_papers):
     df.loc[0, "Q - 21 [Answer]"] = "A"
     with pytest.raises(ValueError, match=r"Q - 21 \[Answer\]"):
         to_bank_columns(df, same_papers.sets)
+
+
+def test_non_contiguous_bank_numbers_round_trip(tmp_path):
+    numbers = [3, 7, 15, 102, 4, 9, 11, 20, 33, 41, 58, 60, 71, 85, 90, 99, 105, 110, 111, 120]
+    bank = FullQuestionBank([_question(no, difficulty="medium") for no in numbers])
+    sets, path = _papers_file(bank, tmp_path, num_sets=6, seed=4)
+    df = generate_responses(str(path), bank, 6, seed=5)
+    assert [c for c in df.columns if c.startswith("Q - ")] == [answer_column(i) for i in range(1, 21)]
+    bank_df = to_bank_columns(df, sets)
+    assert [c for c in bank_df.columns if c.startswith("Q - ")] == [answer_column(n) for n in sorted(numbers)]
+    pd.testing.assert_frame_equal(to_positional_columns(bank_df, sets), df)
+    # every answer a student gave is a bank letter, and the generated correct rate maps back to the bank key
+    assert bank_df[answer_column(3)].isin(list("ABCD")).all()
+
+
+def test_positional_direction_refuses_filled_non_bank_column(tmp_path):
+    bank = FullQuestionBank([_question(no) for no in range(101, 121)])
+    sets, path = _papers_file(bank, tmp_path, num_sets=3, seed=1)
+    df = generate_responses(str(path), bank, 3, seed=1)
+    bank_df = to_bank_columns(df, sets)
+    bank_df["Q - 05 [Answer]"] = None
+    assert "Q - 05 [Answer]" not in to_positional_columns(bank_df, sets).columns.difference(
+        [answer_column(i) for i in range(1, 21)])
+    bank_df.loc[0, "Q - 05 [Answer]"] = "A"
+    with pytest.raises(ValueError, match="not a question in the bank"):
+        to_positional_columns(bank_df, sets)
