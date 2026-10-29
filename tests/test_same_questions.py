@@ -167,3 +167,71 @@ def test_variant_papers_print_options_in_set_order(bank20):
     assert v.question_id == f"S-02:{bank[p.question_no].question_id}"
     assert v.answer == p.answer and v.difficulty == bank[p.question_no].difficulty
     assert v.option_a == getattr(bank[p.question_no], f"option_{p.slots[0].lower()}")
+
+
+# ── Translating answers between positions and bank questions ─────────────────
+
+from types import SimpleNamespace
+
+import pandas as pd
+
+from response_generator import (
+    SET_COL, answer_column, generate_responses, to_bank_columns, to_positional_columns,
+)
+
+
+@pytest.fixture
+def same_papers(bank20, tmp_path):
+    sets, path = _papers_file(bank20, tmp_path, num_sets=6, seed=3)
+    return SimpleNamespace(path=path, bank=bank20, sets=sets)
+
+
+def _one_student(set_name, answers=None):
+    row = {SET_COL: set_name}
+    row.update({answer_column(i): None for i in range(1, 21)})
+    row.update({answer_column(pos): letter for pos, letter in (answers or {}).items()})
+    return pd.DataFrame([row])
+
+
+def test_translation_round_trips(same_papers):
+    df = generate_responses(str(same_papers.path), same_papers.bank, 6, seed=5)
+    assert [c for c in df.columns if c.startswith("Q - ")] == [answer_column(i) for i in range(1, 21)]
+    back = to_positional_columns(to_bank_columns(df, same_papers.sets), same_papers.sets)
+    pd.testing.assert_frame_equal(back, df)
+
+
+def test_typed_letter_maps_to_the_original_letter(same_papers):
+    first = same_papers.sets["S-01"][0]
+    bank_answer = next(q for q in same_papers.bank.get_all()
+                       if q.question_no == first.question_no).answer
+    out = to_bank_columns(_one_student("S-01", {1: first.answer}), same_papers.sets)
+    assert out.loc[0, answer_column(first.question_no)] == bank_answer
+
+
+def test_lowercase_and_spaces_are_read(same_papers):
+    plain = to_bank_columns(_one_student("S-01", {1: "B"}), same_papers.sets)
+    messy = to_bank_columns(_one_student("S-01", {1: " b"}), same_papers.sets)
+    no = same_papers.sets["S-01"][0].question_no
+    assert messy.loc[0, answer_column(no)] == plain.loc[0, answer_column(no)]
+
+
+def test_blank_stays_blank(same_papers):
+    out = to_bank_columns(_one_student("S-01"), same_papers.sets)
+    assert out[[answer_column(i) for i in range(1, 21)]].isna().all().all()
+    assert to_bank_columns(_one_student("S-01", {1: "E"}), same_papers.sets) \
+        .loc[0, answer_column(same_papers.sets["S-01"][0].question_no)] == "E"
+
+
+def test_unknown_set_is_refused(same_papers):
+    with pytest.raises(ValueError, match="Unknown or missing Question Set"):
+        to_bank_columns(_one_student("S-99"), same_papers.sets)
+
+
+def test_extra_blank_columns_are_ignored_and_filled_ones_refused(same_papers):
+    df = _one_student("S-01", {1: "A"})
+    df["Q - 21 [Answer]"] = None
+    out = to_bank_columns(df, same_papers.sets)
+    assert "Q - 21 [Answer]" not in out.columns
+    df.loc[0, "Q - 21 [Answer]"] = "A"
+    with pytest.raises(ValueError, match=r"Q - 21 \[Answer\]"):
+        to_bank_columns(df, same_papers.sets)

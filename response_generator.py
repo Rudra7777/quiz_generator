@@ -18,6 +18,7 @@ from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 
 from excel_handler import load_question_bank, set_label, parse_set_label, SET_LABEL_RE, FullQuestionBank
+from same_questions import SetMap, read_set_map
 
 
 # ── Response sheet column vocabulary ──────────────────────────────────────────
@@ -39,6 +40,87 @@ BANK_NO_COL = "BankNo"
 def answer_column(question_no: int) -> str:
     """Google Forms header for a question's answer column."""
     return f"Q - {question_no:02d} [Answer]"
+
+
+def _translate_letter(value, mapping: Dict[str, str]):
+    """Upper-case and strip a typed letter, then map A-D; anything else is left as it is."""
+    if pd.isna(value):
+        return value
+    letter = str(value).strip().upper()
+    if not letter:
+        return value
+    return mapping.get(letter, letter)
+
+
+def _translate_columns(
+    response_df: pd.DataFrame,
+    set_map: SetMap,
+    source_number,
+    target_number,
+    letter_map,
+) -> pd.DataFrame:
+    """
+    Re-key every row's answer columns for its set.
+
+    source_number(position) / target_number(position) give the question number an
+    answer column is read from and written to; letter_map(position) gives the
+    letter translation.
+    """
+    answer_cols = {}
+    for col in response_df.columns:
+        match = ANSWER_COL_RE.match(str(col).strip())
+        if match:
+            answer_cols[int(match.group(1))] = col
+
+    n = len(next(iter(set_map.values()))) if set_map else 0
+    for number, col in answer_cols.items():
+        if number > n and response_df[col].notna().any():
+            raise ValueError(f"'{col}' is beyond the {n} questions on each paper")
+
+    kept = [c for c in response_df.columns if c not in answer_cols.values()]
+    out = response_df[kept].copy()
+    translated = {answer_column(no): [] for no in range(1, n + 1)}
+
+    for idx, row in response_df.iterrows():
+        set_no = str(row.get(SET_COL, "")).strip()
+        if set_no not in set_map:
+            raise ValueError(f"Unknown or missing {SET_COL} at row {idx + 2}: '{set_no}'")
+        by_target = {}
+        for position, entry in enumerate(set_map[set_no], start=1):
+            col = answer_cols.get(source_number(position, entry))
+            value = row[col] if col is not None else None
+            by_target[target_number(position, entry)] = _translate_letter(value, letter_map(entry))
+        for no in range(1, n + 1):
+            translated[answer_column(no)].append(by_target[no])
+
+    for col, values in translated.items():
+        out[col] = pd.Series(values, index=out.index, dtype=object)
+    return out
+
+
+def to_bank_columns(response_df: pd.DataFrame, set_map: SetMap) -> pd.DataFrame:
+    """
+    Turn positional answers (Q1..Qn as printed on each paper) into bank-question answers.
+
+    Identity columns are kept; answer columns become one per bank question_no holding
+    the bank's original letter.
+    """
+    return _translate_columns(
+        response_df, set_map,
+        source_number=lambda position, entry: position,
+        target_number=lambda position, entry: entry.question_no,
+        letter_map=lambda entry: dict(zip("ABCD", entry.slots)),
+    )
+
+
+def to_positional_columns(response_df: pd.DataFrame, set_map: SetMap) -> pd.DataFrame:
+    """Exact inverse of to_bank_columns: Q - 01 .. Q - n hold the letter as printed on that set."""
+    return _translate_columns(
+        response_df, set_map,
+        source_number=lambda position, entry: entry.question_no,
+        target_number=lambda position, entry: position,
+        letter_map=lambda entry: {orig: "ABCD"[slot] for slot, orig in enumerate(entry.slots)},
+    )
 
 
 def _attach_bank_no(df: pd.DataFrame) -> pd.DataFrame:
@@ -277,7 +359,12 @@ def generate_responses(
 
         rows.append(row)
 
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    set_map = read_set_map(question_papers_path)
+    if set_map is not None:
+        # Every bank question is on every paper, so the columns above are complete.
+        return to_positional_columns(df, set_map)
+    return df
 
 
 def save_response_sheet(df: pd.DataFrame, output_path: str) -> str:
