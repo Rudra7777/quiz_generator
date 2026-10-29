@@ -73,9 +73,24 @@ def _case_step() -> rx.Component:
     )
 
 
-def _config_step() -> rx.Component:
+def _mode_step() -> rx.Component:
     return section(
         "3",
+        "Paper mode",
+        "Draw a different selection per student, or give everyone the whole bank.",
+        rx.radio(
+            ["Question Bank", "Same Questions"],
+            value=GenerateState.paper_mode,
+            on_change=GenerateState.set_paper_mode,
+            direction="row",
+            spacing="5",
+        ),
+    )
+
+
+def _config_step() -> rx.Component:
+    return section(
+        "4",
         "Configuration",
         "How many papers, and how many questions each.",
         rx.hstack(
@@ -89,14 +104,22 @@ def _config_step() -> rx.Component:
                     max=500,
                 ),
             ),
-            field(
-                "Questions per quiz",
-                rx.input(
-                    type="number",
-                    value=GenerateState.total_questions,
-                    on_change=GenerateState.set_total_questions,
-                    min=1,
-                    max=100,
+            rx.cond(
+                GenerateState.paper_mode == "Same Questions",
+                rx.text(
+                    "Every set gets all ", GenerateState.bank_size,
+                    " questions, in its own order and with its own options.",
+                    size="2", color_scheme="gray",
+                ),
+                field(
+                    "Questions per quiz",
+                    rx.input(
+                        type="number",
+                        value=GenerateState.total_questions,
+                        on_change=GenerateState.set_total_questions,
+                        min=1,
+                        max=100,
+                    ),
                 ),
             ),
             spacing="4",
@@ -150,7 +173,7 @@ def _difficulty_step() -> rx.Component:
     )
 
     return section(
-        "4",
+        "5",
         "Difficulty distribution",
         "Set exact counts, or split by percentage of the quiz size.",
         rx.vstack(
@@ -185,7 +208,7 @@ def _difficulty_step() -> rx.Component:
 
 def _seed_step() -> rx.Component:
     return section(
-        "5",
+        "6",
         "Randomization",
         "Use a fixed seed to reproduce an identical allocation.",
         rx.vstack(
@@ -211,7 +234,7 @@ def _seed_step() -> rx.Component:
 
 def _generate_step() -> rx.Component:
     return section(
-        "6",
+        "7",
         "Generate question papers",
         "Produces one sheet per student plus answer key, tables, and an embedded bank.",
         rx.vstack(
@@ -228,7 +251,15 @@ def _generate_step() -> rx.Component:
                 rx.vstack(
                     rx.hstack(
                         stat_tile("Students", GenerateState.generated_count, "indigo"),
-                        stat_tile("Questions / quiz", GenerateState.total_questions, "indigo"),
+                        stat_tile(
+                            "Questions / quiz",
+                            rx.cond(
+                                GenerateState.paper_mode == "Same Questions",
+                                GenerateState.bank_size,
+                                GenerateState.total_questions,
+                            ),
+                            "indigo",
+                        ),
                         stat_tile("Seed used", GenerateState.last_seed, "gray"),
                         spacing="3",
                         width="100%",
@@ -264,8 +295,9 @@ def generate_page() -> rx.Component:
         ),
         _upload_step(),
         _case_step(),
+        _mode_step(),
         _config_step(),
-        _difficulty_step(),
+        rx.cond(GenerateState.paper_mode == "Same Questions", rx.fragment(), _difficulty_step()),
         _seed_step(),
         _generate_step(),
     )

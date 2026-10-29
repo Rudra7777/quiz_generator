@@ -29,8 +29,10 @@ from answer_checker import (
     check_all_responses,
     generate_scoring_report,
 )
+from same_questions import build_same_question_sets, held_in_place
 from excel_export import (
     create_formatted_excel,
+    create_same_questions_excel,
     _make_excel_bytes_from_dataframe,
     _load_question_bank_from_question_papers,
 )
@@ -71,6 +73,7 @@ class GenerateState(rx.State):
     easy_avail: int = 0
 
     # Configuration
+    paper_mode: str = "Question Bank"  # "Question Bank" | "Same Questions"
     num_students: int = 50
     total_questions: int = 15
     mode: str = "Absolute"  # "Absolute" | "Percentage"
@@ -96,6 +99,10 @@ class GenerateState(rx.State):
     # ── Derived values ────────────────────────────────────────────────────
     @rx.var
     def total_avail(self) -> int:
+        return self.hard_avail + self.medium_avail + self.easy_avail
+
+    @rx.var
+    def bank_size(self) -> int:
         return self.hard_avail + self.medium_avail + self.easy_avail
 
     @rx.var
@@ -141,9 +148,15 @@ class GenerateState(rx.State):
 
     @rx.var
     def can_generate(self) -> bool:
-        return self.bank_uploaded and self.size_ok and self.avail_ok
+        return self.bank_uploaded and (
+            self.paper_mode == "Same Questions" or (self.size_ok and self.avail_ok)
+        )
 
     # ── Simple field setters ──────────────────────────────────────────────
+    @rx.event
+    def set_paper_mode(self, value: str):
+        self.paper_mode = value
+
     @rx.event
     def set_num_students(self, value: str):
         self.num_students = _to_int(value, self.num_students)
@@ -259,36 +272,54 @@ class GenerateState(rx.State):
         path = _write_temp(self._bank_bytes)
         try:
             bank = load_question_bank(path)
-            quiz_structure = QuizStructure(
-                hard_count=self.calc_hard,
-                medium_count=self.calc_medium,
-                easy_count=self.calc_easy,
-            )
-            q_ids_by_diff = {
-                "hard": bank.get_question_ids_by_difficulty("hard"),
-                "medium": bank.get_question_ids_by_difficulty("medium"),
-                "easy": bank.get_question_ids_by_difficulty("easy"),
-            }
             run_seed = int(self.seed) if self.use_fixed_seed else secrets.randbelow(2_147_483_647)
-            allocation_matrix, usage_counts = allocate_quizzes(
-                q_ids_by_diff,
-                num_students=self.num_students,
-                quiz_structure=quiz_structure,
-                seed=run_seed,
-            )
-            shuffled_matrix = shuffle_all_quizzes(allocation_matrix, base_seed=run_seed)
-            self._papers_bytes = create_formatted_excel(
-                allocation_matrix=allocation_matrix,
-                shuffled_matrix=shuffled_matrix,
-                usage_counts=usage_counts,
-                question_bank=bank,
-                case_paragraphs=self._case_paragraphs,
-                seed=run_seed,
-            )
+            if self.paper_mode == "Same Questions":
+                set_map = build_same_question_sets(bank, self.num_students, run_seed)
+                self._papers_bytes = create_same_questions_excel(
+                    set_map, bank, self._case_paragraphs, run_seed
+                )
+            else:
+                quiz_structure = QuizStructure(
+                    hard_count=self.calc_hard,
+                    medium_count=self.calc_medium,
+                    easy_count=self.calc_easy,
+                )
+                q_ids_by_diff = {
+                    "hard": bank.get_question_ids_by_difficulty("hard"),
+                    "medium": bank.get_question_ids_by_difficulty("medium"),
+                    "easy": bank.get_question_ids_by_difficulty("easy"),
+                }
+                allocation_matrix, usage_counts = allocate_quizzes(
+                    q_ids_by_diff,
+                    num_students=self.num_students,
+                    quiz_structure=quiz_structure,
+                    seed=run_seed,
+                )
+                shuffled_matrix = shuffle_all_quizzes(allocation_matrix, base_seed=run_seed)
+                self._papers_bytes = create_formatted_excel(
+                    allocation_matrix=allocation_matrix,
+                    shuffled_matrix=shuffled_matrix,
+                    usage_counts=usage_counts,
+                    question_bank=bank,
+                    case_paragraphs=self._case_paragraphs,
+                    seed=run_seed,
+                )
             self.papers_ready = True
             self.last_seed = run_seed
             self.generated_count = self.num_students
-            self.status = f"Generated {self.num_students} question papers."
+            if self.paper_mode == "Same Questions":
+                self.status = (
+                    f"Generated {self.num_students} question papers, "
+                    f"each with all {self.bank_size} questions."
+                )
+                held = held_in_place(bank)
+                if held:
+                    self.status += (
+                        f" {len(held)} question(s) kept their options in place: "
+                        + ", ".join(f"Q{n}" for n in held) + "."
+                    )
+            else:
+                self.status = f"Generated {self.num_students} question papers."
             # Deliver in this same event so the bytes never have to survive a round-trip
             # through the session store — see the note on _build_scoring_report.
             return rx.download(data=self._papers_bytes, filename=self.papers_filename)

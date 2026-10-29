@@ -85,6 +85,25 @@ Question text, numbering and difficulty are untouched, and every question keeps 
 correct answer, just under a new letter. Download the balanced bank and use it on
 Generate Papers as usual.
 
+## Same Questions mode
+
+Choose **Same Questions** on Generate Papers to give every student all the bank's
+questions, each set with its own question order and its own option order. The
+total-questions input and difficulty step are hidden, since nothing is sampled.
+
+Papers number the questions Q1…Qn by position, with no bank numbers, so students cannot
+compare by question number. The Google Form needs answer columns `Q - 01 [Answer]` …
+`Q - n [Answer]` (n = the number of questions) plus `Question Set`. The papers file adds a
+**Set_Map** sheet (Set | Position | Question No | A | B | C | D | Answer) recording where
+each bank question and option sits in each set; Evaluate reads it to score, with no
+extra setting. The scoring report also gets an **As_Typed** sheet showing each student's
+answers as typed, coloured against their set's key. It is a snapshot and does not update
+when edited.
+
+Options stay in their slot when shuffling would break them: "All of the above" and
+"None of the above"-style options, and every option of a question whose options name other
+letters ("Both A and B", "Only C"). The Generate page lists these questions after generating.
+
 ## Output
 
 The generated Excel contains:
@@ -95,6 +114,7 @@ The generated Excel contains:
 - **Allocation_Table**: Original allocation by difficulty
 - **Shuffled_Table**: Randomized order per student
 - **Evaluation**: Usage statistics and metrics
+- **Set_Map** (Same Questions mode only): where each bank question and option sits in each set.
 - **Question_Bank**: The full bank, with each question's correct option highlighted green
   and filter buttons on its header. Above it, a summary grid counts the correct answers by
   difficulty (Hard / Medium / Easy) and option (A–D), with totals and each option's share.
