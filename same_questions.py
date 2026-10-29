@@ -36,9 +36,18 @@ REFERENCE_PHRASES = (
     "all of these", "both of the above", "neither of the above",
 )
 
-# A letter named next to one of these ("both a and b", "only c") refers to an option.
-_LETTER_WORD = re.compile(r"\b[abcd]\b")
-_LINK_WORD = re.compile(r"\b(and|or|only|both|neither)\b|&")
+# An option names other options only when it is nothing but letters and these words
+# ("Both A and B", "Only C is correct"), so "A dog and a cat" does not count.
+_CONNECTIVES = frozenset((
+    "both", "only", "neither", "nor", "and", "or", "option", "options",
+    "answer", "answers", "is", "are", "correct", "true",
+))
+
+
+def _names_other_options(text: str) -> bool:
+    tokens = re.findall(r"[a-z0-9]+", text.lower())
+    return (any(t in "abcd" and len(t) == 1 for t in tokens)
+            and all((len(t) == 1 and t in "abcd") or t in _CONNECTIVES for t in tokens))
 
 
 @dataclass(frozen=True)
@@ -65,7 +74,7 @@ def fixed_slots(q: FullQuestion) -> FrozenSet[int]:
     "All of the above".
     """
     options = [_normalise(o) for o in (q.option_a, q.option_b, q.option_c, q.option_d)]
-    if any(_LETTER_WORD.search(o) and _LINK_WORD.search(o) for o in options):
+    if any(_names_other_options(o) for o in options):
         return frozenset(range(4))
     return frozenset(
         slot for slot, text in enumerate(options)

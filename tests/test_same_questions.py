@@ -378,3 +378,34 @@ def test_old_papers_have_no_as_typed_sheet(tmp_path):
     generate_scoring_report(report, str(out), str(papers), bank)
     wb = load_workbook(out)
     assert "Faculty_Report" in wb.sheetnames and "As_Typed" not in wb.sheetnames
+
+
+@pytest.mark.parametrize("text", [
+    "Both A and B", "A and C", "Only B", "A & B", "A, B and C", "Neither A nor B",
+    "A or B", "Both A and B are correct", "Only C is correct",
+])
+def test_options_naming_letters_hold_every_slot(text):
+    q = _question(1, ("one", "two", "three", text))
+    assert fixed_slots(q) == frozenset({0, 1, 2, 3})
+
+
+@pytest.mark.parametrize("text", [
+    "A capability a firm performs distinctively well and that rivals struggle to imitate",
+    "The network of organisations involved in producing and delivering a product",
+    "A queue of customers waiting for a service",
+    "A dog and a cat", "Vitamin A and C",
+])
+def test_ordinary_sentences_with_letter_words_are_not_held(text):
+    assert fixed_slots(_question(1, ("one", "two", "three", text))) == frozenset()
+
+
+@pytest.mark.parametrize("text", ["all of these", "neither of the above"])
+def test_reference_phrases_hold_only_their_slot(text):
+    assert fixed_slots(_question(1, ("one", "two", "three", text))) == frozenset({3})
+
+
+def test_real_bank_first_20_questions_are_not_held(tmp_path):
+    from excel_handler import load_question_bank
+    path = tmp_path / "bank20.xlsx"
+    pd.read_excel("input/question_bank.xlsx").head(20).to_excel(path, index=False)
+    assert held_in_place(load_question_bank(str(path))) == []
