@@ -55,6 +55,8 @@ AS_TYPED_NOTE = (
     "Coloured against each set's key when this report was made. A key fix in "
     "Faculty_Report is not reflected here; regenerate the report after correcting the bank."
 )
+AS_TYPED_BANK_LABEL = "Bank Q →"
+BANK_NO_FONT = Font(italic=True, color="FF808080")
 
 
 @dataclass
@@ -708,9 +710,10 @@ def _write_faculty_report(
 
 def _write_as_typed(writer: pd.ExcelWriter, scored_df: pd.DataFrame, set_map: SetMap) -> None:
     """
-    Write 'As_Typed': what each student typed by paper position (Q1..Qn), coloured
-    right/wrong against their own set's key. Rows follow Faculty_Report's order.
-    Colours are fixed at the time the report is made.
+    Write 'As_Typed': what each student typed by paper position (Paper Q1..Qn), coloured
+    right/wrong against their own set's key, with a grey row under each student giving
+    the bank question number (as in Faculty_Report) at each position. Rows follow
+    Faculty_Report's order. Colours are fixed at the time the report is made.
     """
     ws = writer.book.create_sheet("As_Typed")
     typed_df = to_positional_columns(scored_df, set_map)
@@ -718,19 +721,24 @@ def _write_as_typed(writer: pd.ExcelWriter, scored_df: pd.DataFrame, set_map: Se
 
     ws.cell(row=1, column=1, value=AS_TYPED_NOTE)
 
-    headers = ["Roll Number", "Full Name", "Set"] + [f"Q{i}" for i in range(1, n + 1)] + ["Correct"]
+    headers = (["Roll Number", "Full Name", "Set"]
+               + [f"Paper Q{i}" for i in range(1, n + 1)] + ["Correct"])
     for col, header in enumerate(headers, 1):
         ws.cell(row=3, column=col, value=header).font = Font(bold=True)
 
     for offset, (_, row) in enumerate(typed_df.iterrows()):
-        excel_row = 4 + offset
+        excel_row = 4 + 2 * offset
         set_no = _cell_text(row.get(SET_COL))
         ws.cell(row=excel_row, column=1, value=_cell_text(row.get(ROLL_COL)))
         ws.cell(row=excel_row, column=2, value=_cell_text(row.get(NAME_COL)))
         ws.cell(row=excel_row, column=3, value=set_no)
+        ws.cell(row=excel_row + 1, column=3, value=AS_TYPED_BANK_LABEL).font = BANK_NO_FONT
 
         correct = 0
         for position, entry in enumerate(set_map[set_no], start=1):
+            bank_cell = ws.cell(row=excel_row + 1, column=3 + position,
+                                value=f"Q{entry.question_no:02d}")
+            bank_cell.font = BANK_NO_FONT
             typed = _normalize_answer(row.get(answer_column(position)))
             if typed is None:
                 continue

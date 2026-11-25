@@ -99,7 +99,8 @@ compare by question number. The Google Form needs answer columns `Q - 01 [Answer
 **Set_Map** sheet (Set | Position | Question No | A | B | C | D | Answer) recording where
 each bank question and option sits in each set; Evaluate reads it to score, with no
 extra setting. The scoring report also gets an **As_Typed** sheet showing each student's
-answers as typed, coloured against their set's key. It is a snapshot and does not update
+answers as typed under **Paper Q1…Qn**, coloured against their set's key, with a grey
+**Bank Q** row under each student naming the Faculty_Report question at each position. It is a snapshot and does not update
 when edited.
 
 Options stay in their slot when shuffling would break them: "All of the above" and

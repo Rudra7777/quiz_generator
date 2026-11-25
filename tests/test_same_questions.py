@@ -348,20 +348,22 @@ def test_as_typed_sheet(same_papers, tmp_path):
     ws = wb["As_Typed"]
     assert ws["A1"].value.startswith("Coloured against each set's key")
     assert [c.value for c in ws[3]] == (
-        ["Roll Number", "Full Name", "Set"] + [f"Q{i}" for i in range(1, 21)] + ["Correct"])
+        ["Roll Number", "Full Name", "Set"] + [f"Paper Q{i}" for i in range(1, 21)] + ["Correct"])
     scores = {str(row[0].value): row[6].value for row in wb["Scores"].iter_rows(min_row=2)}
     typed_by_roll = {str(row[ROLL_COL]).strip(): row for _, row in df.iterrows()}
     rows = list(ws.iter_rows(min_row=4, values_only=False))
-    assert len(rows) == len(df)
-    for cells in rows:
+    assert len(rows) == 2 * len(df)
+    for cells, bank_cells in zip(rows[::2], rows[1::2]):
         roll = str(cells[0].value)
         src = typed_by_roll[roll]
-        key = [p.answer for p in same_papers.sets[cells[2].value]]
+        positions = same_papers.sets[cells[2].value]
+        assert bank_cells[2].value == "Bank Q →"
         for i in range(1, 21):
             cell = cells[2 + i]
+            assert bank_cells[2 + i].value == f"Q{positions[i - 1].question_no:02d}"
             assert cell.value == src[answer_column(i)]
             if cell.value is not None:
-                assert cell.font.italic == (cell.value != key[i - 1])
+                assert cell.font.italic == (cell.value != positions[i - 1].answer)
         assert cells[23].value == scores[roll] and isinstance(cells[23].value, int)
 
 
@@ -391,7 +393,7 @@ def test_non_contiguous_bank_scores_end_to_end(tmp_path):
     wb = _scored_workbook(report, path, bank, tmp_path)
     strip = [c.value for c in wb["Faculty_Report"][1] if c.value]
     assert strip == [f"Q{n:02d}" for n in sorted(numbers)]
-    assert wb["As_Typed"].max_row == 3 + len(df)
+    assert wb["As_Typed"].max_row == 3 + 2 * len(df)
 
 
 def test_old_papers_have_no_as_typed_sheet(tmp_path):
