@@ -87,34 +87,58 @@ def held_in_place(bank: FullQuestionBank) -> List[int]:
     return [q.question_no for q in bank.get_all() if fixed_slots(q)]
 
 
-def _target_letters(questions: List[FullQuestion], fixed: Dict[int, FrozenSet[int]],
-                    rng: random.Random) -> Dict[int, int]:
+def _rotation_plan(questions: List[FullQuestion], fixed: Dict[int, FrozenSet[int]],
+                   rng: random.Random) -> Dict[int, List[int]]:
     """
-    Choose the slot (0-3) the correct option goes to for each question number.
+    For the next block of four sets, the slot each freely movable question's answer takes
+    in each of them.
 
-    A question whose correct option is in a fixed slot keeps it. The rest are visited
-    in random order, most restricted first so they are not left with only the slots the
-    others have filled, and each takes the allowed slot used least so far, ties at
-    random, so the key comes out with floor(n/4) of every letter.
+    The questions are dealt starting offsets 0-3 in turn, so every set in the block gets
+    floor(n/4) of every slot, and each question steps through all four slots over the
+    block. A random relabelling of the slots per block keeps blocks from looking alike.
+    """
+    free = [q for q in questions if not fixed[q.question_no]]
+    rng.shuffle(free)
+    relabel = rng.sample(range(4), 4)
+    return {
+        q.question_no: [relabel[(i + step) % 4] for step in range(4)]
+        for i, q in enumerate(free)
+    }
+
+
+def _target_letters(questions: List[FullQuestion], fixed: Dict[int, FrozenSet[int]],
+                    plan: Dict[int, List[int]], step: int,
+                    across: Dict[int, List[int]], rng: random.Random) -> Dict[int, int]:
+    """
+    Choose the slot (0-3) the correct option goes to for each question number in one set.
+
+    Freely movable questions follow the block's rotation plan. A question whose correct
+    option is in a fixed slot keeps it. A question with only some slots held takes the
+    allowed slot it has used least across the sets, ties going to the slot this set has
+    used least, then at random. across[question_no][slot] is updated in place.
     """
     targets, counts = {}, [0] * 4
-    flexible = []
+    partly_held = []
     for q in questions:
         current = LETTERS.index(q.answer.strip().upper())
-        if current in fixed[q.question_no]:
+        if q.question_no in plan:
+            targets[q.question_no] = plan[q.question_no][step]
+        elif current in fixed[q.question_no]:
             targets[q.question_no] = current
-            counts[current] += 1
         else:
-            flexible.append(q)
+            partly_held.append(q)
+            continue
+        counts[targets[q.question_no]] += 1
 
-    rng.shuffle(flexible)
-    flexible.sort(key=lambda q: -len(fixed[q.question_no]))
-    for q in flexible:
+    rng.shuffle(partly_held)
+    for q in partly_held:
+        used = across[q.question_no]
         allowed = [s for s in range(4) if s not in fixed[q.question_no]]
-        fewest = min(counts[s] for s in allowed)
-        slot = rng.choice([s for s in allowed if counts[s] == fewest])
+        best = min((used[s], counts[s]) for s in allowed)
+        slot = rng.choice([s for s in allowed if (used[s], counts[s]) == best])
         targets[q.question_no] = slot
         counts[slot] += 1
+        used[slot] += 1
     return targets
 
 
@@ -123,8 +147,9 @@ def build_same_question_sets(bank: FullQuestionBank, num_sets: int,
     """
     Build the Set Map: num_sets sets, each holding every question exactly once.
 
-    No two sets share a question order. Within a set the correct answers are spread
-    evenly over A-D, and each question's options are shuffled except the fixed ones.
+    No two sets share a question order. Across the sets each question's correct answer
+    is spread evenly over A-D (within a set too, as far as that allows), and each
+    question's options are shuffled except the fixed ones.
     """
     questions = bank.get_all()
     n = len(questions)
@@ -136,6 +161,7 @@ def build_same_question_sets(bank: FullQuestionBank, num_sets: int,
 
     rng = random.Random(seed)
     fixed = {q.question_no: fixed_slots(q) for q in questions}
+    across = {q.question_no: [0] * 4 for q in questions}
     used_orders = set()
     sets: SetMap = {}
 
@@ -146,7 +172,9 @@ def build_same_question_sets(bank: FullQuestionBank, num_sets: int,
             rng.shuffle(order)
         used_orders.add(tuple(q.question_no for q in order))
 
-        targets = _target_letters(questions, fixed, rng)
+        if (number - 1) % 4 == 0:
+            plan = _rotation_plan(questions, fixed, rng)
+        targets = _target_letters(questions, fixed, plan, (number - 1) % 4, across, rng)
         positions = []
         for q in order:
             current = LETTERS.index(q.answer.strip().upper())

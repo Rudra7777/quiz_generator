@@ -72,11 +72,39 @@ def test_held_options_stay_in_their_slot(bank20):
         assert by_no[12].slots == "ABCD"
 
 
-def test_each_set_key_is_balanced(bank20):
-    # 20 questions -> 5 of each letter; Q5 (D) and Q12 (fixed) are absorbed.
+def _answer_spread(sets, question_no):
+    return Counter(p.answer for ps in sets.values() for p in ps if p.question_no == question_no)
+
+
+@pytest.mark.parametrize("num_sets", [64, 65, 10])
+def test_each_question_answer_is_balanced_across_sets(bank20, num_sets):
+    sets = build_same_question_sets(bank20, num_sets, seed=4)
+    for no in range(1, 21):
+        spread = _answer_spread(sets, no)
+        if no in (5, 12):  # answer sits in a held slot
+            continue
+        letters = "ABD" if no == 9 else "ABCD"  # Q9's C is held
+        counts = [spread[letter] for letter in letters]
+        assert sum(counts) == num_sets and max(counts) - min(counts) <= 1
+
+
+def test_64_sets_give_each_letter_exactly_a_quarter(bank20):
+    sets = build_same_question_sets(bank20, 64, seed=7)
+    for no in range(1, 21):
+        if no not in (5, 9, 12):
+            assert _answer_spread(sets, no) == {"A": 16, "B": 16, "C": 16, "D": 16}
+
+
+def test_each_set_key_is_balanced_when_nothing_is_held():
+    bank = FullQuestionBank([_question(no) for no in range(1, 21)])
+    for positions in build_same_question_sets(bank, 65, seed=4).values():
+        assert set(Counter(p.answer for p in positions).values()) == {5}
+
+
+def test_held_questions_shift_a_set_key_only_a_little(bank20):
     for positions in build_same_question_sets(bank20, 65, seed=4).values():
         counts = Counter(p.answer for p in positions)
-        assert max(counts.values()) - min(counts.values()) <= 1
+        assert max(counts.values()) - min(counts.values()) <= 3
 
 
 def test_seed_makes_generation_repeatable(bank20):

@@ -53,10 +53,11 @@ stays, and the new method is a second mode chosen for each quiz.
 - For each set:
   1. **Question order:** a random permutation of all bank questions. No two sets may
      have the same order; if one repeats, draw again.
-  2. **Options:** each question's four options are reordered for that set. Each set's
-     key is balanced across A–D: floor(n/4) of every letter, with the 1–3 leftovers on
-     randomly chosen letters. This reuses the balancing idea in `option_shuffler.py`,
-     applied per set. Unlike the Shuffle page, this mode does not require that no option
+  2. **Options:** each question's four options are reordered for that set. Across the
+     sets, each question's correct answer goes to A, B, C and D a quarter of the time
+     each (faculty request, 2026-11-25). Answers rotate through slots in blocks of four
+     sets, so each set's key also gets floor(n/4) of every letter, except where held
+     options stop a question moving. Unlike the Shuffle page, this mode does not require that no option
      stays in its original place. *(my call)*
 - The bank as uploaded is the reference. Its `answer` column is the "original letter"
   every translation goes back to.

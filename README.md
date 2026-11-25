@@ -88,7 +88,9 @@ Generate Papers as usual.
 ## Same Questions mode
 
 Choose **Same Questions** on Generate Papers to give every student all the bank's
-questions, each set with its own question order and its own option order. The
+questions, each set with its own question order and its own option order. Across the
+sets, each question's correct answer is A, B, C and D a quarter of the time each (exactly,
+when the number of sets is a multiple of 4), and each set's key is spread evenly too. The
 total-questions input and difficulty step are hidden, since nothing is sampled.
 
 Papers number the questions Q1…Qn by position, with no bank numbers, so students cannot
